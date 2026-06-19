@@ -283,6 +283,43 @@
 - Configured `origin` as `https://github.com/phetjaaeiei/AI-Agent.git`.
 - Verified GitHub CLI authentication and repository admin/push permission.
 - Published all 86 tracked project files in initial commit `5baa152` and configured `main` to track `origin/main`.
+- Continued Phase 7 GitHub Repository Integration with read-only remote health.
+- Added `remote_health` as a policy-controlled Git operation kind.
+- Added Git remote health contracts for provider, repository label, sanitized remote URL, default branch, local branch, local/remote HEAD SHA, upstream tracking, ahead/behind counts, access state, and best-effort GitHub auth metadata.
+- Added `allowRemoteRead` to the Git policy snapshot, enabled by default and disabled with `TEAM_AI_AGENT_ALLOW_GIT_REMOTE_READ=false`.
+- Implemented remote health in `LocalGitRunner` using `git ls-remote` and upstream status checks through `spawn` with `shell: false`; GitHub CLI checks are best-effort and never persist credentials.
+- Persisted remote health as Git operation audit/activity evidence and a `Remote Health Evidence` artifact.
+- Added Mission Control UI for `Check remote`, remote read policy state, reachable/blocked remote status, repository label, and branch/default branch facts.
+- Extended the frontend Git operation request timeout so slower remote-read checks can update Mission Control instead of timing out while the server finishes successfully.
+- Updated deterministic Git runner and orchestrator verification fixtures with local bare remotes so remote-read coverage does not require network access.
+- Updated [GIT_INTEGRATION.md](./GIT_INTEGRATION.md) and [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md) for the completed G1 remote-read slice.
+- Continued Phase 7 GitHub Repository Integration with G2 remote mutation policy preflight.
+- Added `branch_push_policy` and `draft_pr_policy` as read-only Git operation kinds.
+- Added remote mutation policy contracts for mutation kind, allow/deny decision, actor, target branch, commit SHA, remote target, base branch, permission state, explicit reviewed delivery evidence, disabled force-push/branch-deletion states, blockers, and checked time.
+- Added branch policy enforcement for future remote mutations:
+  - branch names must target `codex/*`;
+  - protected base branches such as `main` and `master` are blocked;
+  - denied path changes remain blocked;
+  - uncommitted worktree changes block remote mutation because the policy must target a committed SHA.
+- Git operation service now optionally receives the review packet store and requires an explicit `reviewPacketId` whose packet status is `delivered` and has delivery artifact content before a future remote mutation can pass.
+- Mission Control Git Integration now exposes `Check push` and `Check PR policy` actions plus a compact latest remote mutation policy summary.
+- Added deterministic policy coverage for disabled branch push, disabled PR creation, explicit review packet requirements, delivered review packet recognition, force-push disabled state, branch-deletion disabled state, and artifact creation.
+- Continued Phase 7 GitHub Repository Integration with G3 draft pull request connector work.
+- Added `branch_push` and `draft_pr_create` as policy-controlled Git operation kinds.
+- Added branch-push and draft-PR result contracts that record branch, remote, commit SHA, tracking branch, draft PR URL, PR number, base/head branches, and draft-only state without storing credentials.
+- Actual remote mutation operations are blocked before execution unless an explicit delivered review packet from the same mission/task is present.
+- Branch push now requires a clean current `codex/*` branch, reachable `origin`, matching target branch, enabled remote push permission, no denied path changes, and no uncommitted work.
+- Draft PR creation now requires enabled PR creation permission, a previously pushed remote branch whose SHA matches local HEAD, and uses `gh pr create --draft`.
+- Draft PR bodies are hydrated from the reviewed delivery artifact Markdown and include remote safety notes for manual merge, disabled force push, disabled branch deletion, and disabled deployment.
+- Mission Control now exposes disabled-by-default `Push branch` and `Create draft PR` actions while showing separate remote push and PR creation policy facts.
+- Added deterministic connector coverage with a local bare `origin` for branch push and a fake `gh` executable for draft PR creation, so tests do not contact GitHub.
+- Continued Phase 7 GitHub Repository Integration with G4 Mission Control remote evidence.
+- Added `remote_evidence` as a read-only Git operation kind.
+- Added remote publication evidence contracts for repository, branch, local commit, remote commit, publication state, PR state, check summary, blocked actions, retryability, and retry reason.
+- `remote_evidence` distinguishes `local_only`, `published_current`, `published_stale`, and `unknown` without mutating the remote.
+- GitHub PR and status check evidence are best-effort through `gh pr view`; missing PRs are reported as `none`, and network/auth/parse failures return retryable evidence instead of repeating commits or remote mutations.
+- Mission Control now exposes `Check evidence` / `Retry evidence` and shows publication state, PR status, checks state, retry reason, and still-blocked merge/deploy/force-push/branch-deletion actions.
+- Updated deterministic fixtures to cover local remote publication evidence and fake GitHub PR/check evidence using a Git `insteadOf` rewrite to a local bare remote.
 
 ### Verification
 
@@ -299,6 +336,68 @@
 - `npm run verify:mission-controller`: passed complete, policy block, retry limit, CI failure, reviewer revision, cancellation, restart recovery, idempotency, delivery, and reset paths.
 - `npm run verify:orchestrator`: now also covers controller start/list/detail/cancel endpoints and reset clearing controller history.
 - `npm run build:web`: passed without browser-externalized Node module warnings.
+- `npm run typecheck`: passed after Phase 7 remote-read health changes.
+- `npm run verify:git-runner`: passed with 6 default-policy operations, including deterministic `remote_health` against a local bare `origin`, and 5 Git artifacts.
+- `npm run verify:orchestrator`: passed with remote-health HTTP coverage, artifact creation, and Git operation reset coverage.
+- `npm run build:web`: passed after adding the Mission Control `Check remote` UI.
+- `npm run typecheck`: passed after Phase 7 G2 remote mutation policy changes.
+- `npm run verify:git-runner`: passed with 8 default-policy operations, including `branch_push_policy` and `draft_pr_policy`, and 7 Git artifacts.
+- `npm run verify:orchestrator`: passed with branch-push and draft-PR policy HTTP coverage.
+- `npm run verify:review-packet`: passed with delivered review packet recognition in branch-push policy preflight.
+- `npm run build:web`: passed after adding Mission Control remote policy actions.
+- `npm run typecheck`: passed after Phase 7 G3 branch-push and draft-PR connector changes.
+- `npm run verify:git-runner`: passed with 10 default-policy operations, including default blocks for `branch_push` and `draft_pr_create`, and 7 Git artifacts.
+- `npm run verify:orchestrator`: passed with HTTP coverage for default-blocked `branch_push` and `draft_pr_create`.
+- `npm run verify:review-packet`: passed with enabled branch push to a local bare origin and fake-`gh` draft PR creation using reviewed delivery Markdown.
+- `npm run typecheck`: passed after Phase 7 G4 remote evidence changes.
+- `npm run verify:git-runner`: passed with 11 default-policy operations, including `remote_evidence`, and 8 Git artifacts.
+- `npm run verify:orchestrator`: passed with HTTP coverage for `remote_evidence` artifact creation and blocked remote actions.
+- `npm run verify:review-packet`: passed with fake GitHub PR/check evidence after enabled branch push and fake draft PR creation.
+- `npm run verify:foundation`: passed after Phase 7 G4 changes.
+- `npm run verify:agent-runtime`: passed after Phase 7 G4 changes.
+- `npm run verify:tool-runner`: passed after Phase 7 G4 changes.
+- `npm run verify:mission-controller`: passed after Phase 7 G4 changes.
+- `npm run build:web`: passed after adding Mission Control branch-push/draft-PR connector actions and an inline favicon.
+- `git diff --check`: passed after Phase 7 G3 changes.
+- `npm run build:web`: passed after Phase 7 G4 remote evidence UI changes.
+- `git diff --check`: passed after Phase 7 G4 changes.
+- Phase 7 remote evidence rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
+  - Git Integration card showed `Check evidence`, `Remote push off`, and `PR draft only`;
+  - desktop `Check evidence` completed as a read-only operation and showed a remote publication evidence panel with publication state plus merge/deploy/force-push/branch-deletion blocked state or retry guidance;
+  - console errors/warnings: none;
+  - failed network responses: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-evidence-desktop.png` and `/tmp/team-ai-agent-remote-evidence-mobile.png`.
+- Phase 7 draft pull request connector rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - the Playwright packaged browser binary was missing, so installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
+  - Git Integration card showed `Remote push off`, `PR draft only`, disabled `Push branch`, and disabled `Create draft PR`;
+  - desktop `Check push` and `Check PR policy` completed as non-mutating policy checks and showed `Remote policy blocked` plus `Delivery required`;
+  - console errors/warnings: none;
+  - failed network responses: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-draft-pr-connector-desktop.png` and `/tmp/team-ai-agent-draft-pr-connector-mobile.png`.
+- Phase 7 remote mutation policy rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - `Check push` and `Check PR policy` both completed without mutating the remote;
+  - Git Integration card showed `Remote policy blocked`, `Delivery required`, `Force push off, deletion off`, and completed `Push policy` / `PR policy` rows;
+  - both policy operations recorded 3 blockers in the default local state;
+  - Artifact Memory included remote mutation policy evidence;
+  - console errors/warnings: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-policy-desktop.png` and `/tmp/team-ai-agent-remote-policy-mobile.png`;
+  - live orchestrator Git operation history was reset to `[]` after QA.
+- Phase 7 remote-health rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - `Check remote` completed against `phetjaaeiei/AI-Agent`;
+  - Git Integration card showed `Remote ok`, `Remote read on`, `main -> main`, and a completed `Remote health` row;
+  - Artifact Memory included remote health evidence;
+  - console errors/warnings: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-health-desktop.png` and `/tmp/team-ai-agent-remote-health-mobile.png`;
+  - live orchestrator state was reset to the default session after QA.
 - `npm run eval:agent-runtime`: 6 passed, 0 failed.
 - `npm run verify:ollama`: passed with `qwen3:8b`, structured planner/verifier output, persisted traces, and an agent-runtime artifact.
 - Live rendered Ollama run used 2 attempts and 5,275 local tokens, then correctly entered `blocked` at 81/100 because the verifier still requested revision after the configured limit.
@@ -336,5 +435,5 @@
 
 ### Next
 
-- Continue Phase 7 GitHub Repository Integration with remote-read health, explicit push policy, and draft-PR connector work.
-- Keep remote push, remote PR creation, merge, deployment, production actions, and destructive Git reset/checkout disabled until explicit integration policy is added.
+- Publish the completed Phase 7 work from the existing `codex/*` branch to GitHub as a draft PR for human review.
+- Keep merge, deployment, production actions, force push, branch deletion, and destructive Git reset/checkout disabled.

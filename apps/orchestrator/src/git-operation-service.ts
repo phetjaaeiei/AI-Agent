@@ -7,7 +7,9 @@ import type {
   GitOperationRequest,
   GitOperationResult,
   GitPolicyDecision,
-  GitPolicySnapshot
+  GitPolicySnapshot,
+  GitRemoteMutationPolicy,
+  ReviewPacket
 } from "../../../packages/shared/src/index.js";
 import {
   createRuntimeArtifactRecord,
@@ -18,12 +20,14 @@ import type { RuntimeActivityEvent, RuntimeArtifactContent, RuntimeArtifactSecti
 import type { ArtifactContentStore } from "./artifact-content-store.js";
 import type { MissionStore } from "./mission-store.js";
 import type { GitOperationStore } from "./git-operation-store.js";
+import type { ReviewPacketStore } from "./review-packet-store.js";
 
 type GitOperationServiceOptions = {
   runner: GitRunner;
   operationStore: GitOperationStore;
   missionStore: MissionStore;
   artifactStore: ArtifactContentStore;
+  reviewPacketStore?: ReviewPacketStore;
   now?: () => string;
 };
 
@@ -49,7 +53,7 @@ export class GitOperationService {
   async executeOperation(input: GitOperationRequest): Promise<GitOperationRecord> {
     const requestedAt = this.now();
     const id = `git-op-${randomUUID()}`;
-    const executionRequest = { ...input, id };
+    let executionRequest = { ...input, id };
     const policy = this.evaluatePolicy(executionRequest);
     const initial: GitOperationRecord = {
       schemaVersion: 1,
@@ -78,11 +82,31 @@ export class GitOperationService {
       return operation;
     }
 
+    if (requiresReviewedDeliveryBeforeExecution(input.kind)) {
+      const review = await this.resolveReviewedDelivery(input);
+      if (review.blockers.length > 0) {
+        const reason = `Remote mutation blocked before execution: ${review.blockers.join(" ")}`;
+        operation = await this.patchOperation(operation, {
+          status: "blocked",
+          policy: { ...policy, allowed: false, reason },
+          errorCode: "remote_disabled",
+          errorSummary: reason,
+          completedAt: this.now(),
+          updatedAt: this.now()
+        });
+        await this.persistSessionEvidence(operation);
+        return operation;
+      }
+      if (review.packet) {
+        executionRequest = await this.attachReviewedDeliveryToDraftPr(executionRequest, review.packet);
+      }
+    }
+
     operation = await this.patchOperation(operation, { status: "running", startedAt: this.now(), updatedAt: this.now() });
     await this.persistSessionEvidence(operation);
 
     try {
-      const result = await this.options.runner.execute(executionRequest);
+      const result = await this.finalizeRemoteMutationPolicy(input, await this.options.runner.execute(executionRequest));
       const artifact = shouldCreateArtifact(operation, result) ? await this.persistGitArtifact(operation, result) : undefined;
       operation = await this.patchOperation(operation, {
         status: "completed",
@@ -113,6 +137,86 @@ export class GitOperationService {
     } catch (error) {
       return { allowed: false, reason: error instanceof Error ? error.message : "Git request failed policy evaluation." };
     }
+  }
+
+  private async finalizeRemoteMutationPolicy(input: GitOperationRequest, result: GitOperationResult): Promise<GitOperationResult> {
+    if (!result.remoteMutationPolicy) return result;
+
+    const review = await this.resolveReviewedDelivery(input);
+    const reviewBlockers = review.blockers;
+    const blockers = [...result.remoteMutationPolicy.blockers, ...reviewBlockers];
+    const allowed = blockers.length === 0;
+    const remoteMutationPolicy: GitRemoteMutationPolicy = {
+      ...result.remoteMutationPolicy,
+      allowed,
+      reason: allowed
+        ? `${mutationLabel(result.remoteMutationPolicy.mutationKind)} policy preflight passed with reviewed delivery evidence.`
+        : `${mutationLabel(result.remoteMutationPolicy.mutationKind)} policy preflight blocked by ${blockers.length} requirement(s).`,
+      reviewedDeliveryPresent: Boolean(review.packet),
+      ...(review.packet ? { reviewPacketId: review.packet.id } : {}),
+      ...(review.packet?.deliveryArtifactContentId ? { deliveryArtifactContentId: review.packet.deliveryArtifactContentId } : {}),
+      blockers
+    };
+    const isMutationExecution = Boolean(result.branchPush || result.draftPullRequest);
+    const policyEvidence = [
+      `Mutation: ${remoteMutationPolicy.mutationKind}`,
+      `Actor: ${remoteMutationPolicy.actorRoleId}`,
+      `Branch: ${remoteMutationPolicy.branchName}`,
+      `Commit: ${remoteMutationPolicy.commitSha}`,
+      `Remote target: ${remoteMutationPolicy.remoteTarget}`,
+      `Permission allowed: ${String(remoteMutationPolicy.permissionAllowed)}`,
+      `Reviewed delivery present: ${String(remoteMutationPolicy.reviewedDeliveryPresent)}`,
+      ...(remoteMutationPolicy.reviewPacketId ? [`Review packet: ${remoteMutationPolicy.reviewPacketId}`] : []),
+      ...(remoteMutationPolicy.deliveryArtifactContentId ? [`Delivery artifact: ${remoteMutationPolicy.deliveryArtifactContentId}`] : []),
+      `Force push allowed: ${String(remoteMutationPolicy.forcePushAllowed)}`,
+      `Branch deletion allowed: ${String(remoteMutationPolicy.branchDeletionAllowed)}`,
+      ...remoteMutationPolicy.blockers.map((blocker) => `Blocker: ${blocker}`)
+    ];
+
+    return {
+      ...result,
+      summary: isMutationExecution ? result.summary : remoteMutationPolicy.reason,
+      evidence: isMutationExecution ? [...result.evidence, ...policyEvidence] : policyEvidence,
+      remoteMutationPolicy
+    };
+  }
+
+  private async resolveReviewedDelivery(input: GitOperationRequest): Promise<{ packet?: ReviewPacket; blockers: string[] }> {
+    if (!resultNeedsReviewedDelivery(input.kind)) return { blockers: [] };
+    if (!this.options.reviewPacketStore) return { blockers: ["Review packet store is not configured for remote mutation policy."] };
+    if (!input.reviewPacketId?.trim()) return { blockers: ["Explicit reviewPacketId is required before remote mutation."] };
+
+    const packet = await this.options.reviewPacketStore.findPacket(input.reviewPacketId);
+    if (!packet) return { blockers: ["Review packet was not found."] };
+    if (packet.missionId !== input.missionId) return { blockers: ["Review packet belongs to a different mission."] };
+    if (packet.taskId !== input.taskId) return { blockers: ["Review packet belongs to a different task."] };
+    if (packet.status !== "delivered") return { blockers: [`Review packet status is ${packet.status}; delivered is required.`] };
+    if (!packet.deliveryArtifactContentId) return { blockers: ["Review packet has no delivery artifact content."] };
+
+    return { packet, blockers: [] };
+  }
+
+  private async attachReviewedDeliveryToDraftPr<T extends GitOperationRequest & { id: string }>(input: T, packet: ReviewPacket): Promise<T> {
+    if (input.kind !== "draft_pr_create" || input.pullRequestBody?.trim()) return input;
+    if (!packet.deliveryArtifactContentId) return input;
+
+    const deliveryArtifact = (await this.options.artifactStore.readArtifacts()).find((artifact) => artifact.id === packet.deliveryArtifactContentId);
+    if (!deliveryArtifact) return input;
+
+    const safetyNotes = [
+      "## Remote Safety",
+      "- Draft PR creation only; merge remains a human decision.",
+      "- Force push remains disabled.",
+      "- Branch deletion remains disabled.",
+      "- Deployment and production actions remain disabled."
+    ].join("\n");
+    const body = [deliveryArtifact.markdown, "", safetyNotes].join("\n").slice(0, 60_000);
+
+    return {
+      ...input,
+      pullRequestTitle: input.pullRequestTitle?.trim() || `Draft PR: ${deliveryArtifact.title}`,
+      pullRequestBody: body
+    };
   }
 
   private patchOperation(operation: GitOperationRecord, patch: Partial<GitOperationRecord>): Promise<GitOperationRecord> {
@@ -206,10 +310,16 @@ export class GitOperationService {
 }
 
 function shouldCreateArtifact(operation: GitOperationRecord, result: GitOperationResult): boolean {
-  return operation.kind === "diff" || operation.kind === "commit_plan" || operation.kind === "pr_draft" || operation.kind === "local_commit" || Boolean(result.diff?.diff);
+  return operation.kind === "diff" || operation.kind === "commit_plan" || operation.kind === "pr_draft" || operation.kind === "local_commit" || operation.kind === "remote_health" || operation.kind === "remote_evidence" || operation.kind === "branch_push_policy" || operation.kind === "draft_pr_policy" || operation.kind === "branch_push" || operation.kind === "draft_pr_create" || Boolean(result.diff?.diff);
 }
 
 function artifactIdForOperation(operation: GitOperationRecord): string {
+  if (operation.kind === "branch_push") return `art-branch-push-${operation.id}`;
+  if (operation.kind === "draft_pr_create") return `art-draft-pr-create-${operation.id}`;
+  if (operation.kind === "branch_push_policy") return `art-branch-push-policy-${operation.id}`;
+  if (operation.kind === "draft_pr_policy") return `art-draft-pr-policy-${operation.id}`;
+  if (operation.kind === "remote_evidence") return `art-remote-evidence-${operation.id}`;
+  if (operation.kind === "remote_health") return `art-remote-health-${operation.id}`;
   if (operation.kind === "pr_draft") return `art-pr-draft-${operation.id}`;
   if (operation.kind === "local_commit") return `art-local-commit-${operation.id}`;
   if (operation.kind === "commit_plan") return `art-commit-plan-${operation.id}`;
@@ -217,6 +327,12 @@ function artifactIdForOperation(operation: GitOperationRecord): string {
 }
 
 function artifactTitleForOperation(operation: GitOperationRecord): string {
+  if (operation.kind === "branch_push") return "Branch Push Evidence";
+  if (operation.kind === "draft_pr_create") return "Draft Pull Request Evidence";
+  if (operation.kind === "branch_push_policy") return "Branch Push Policy";
+  if (operation.kind === "draft_pr_policy") return "Draft PR Policy";
+  if (operation.kind === "remote_evidence") return "Remote Publication Evidence";
+  if (operation.kind === "remote_health") return "Remote Health Evidence";
   if (operation.kind === "pr_draft") return "Pull Request Draft";
   if (operation.kind === "local_commit") return "Local Commit Evidence";
   if (operation.kind === "commit_plan") return "Git Commit Plan";
@@ -264,6 +380,93 @@ function sectionsForGitResult(operation: GitOperationRecord, result: GitOperatio
       evidence: [`Title: ${result.prDraft.title}`, `Status: ${result.prDraft.status}`, `Base: ${result.prDraft.baseBranch}`, `Head: ${result.prDraft.headBranch}`]
     });
   }
+  if (result.remoteHealth) {
+    sections.push({
+      heading: "Remote Health",
+      body: result.remoteHealth.summary,
+      evidence: [
+        `Repository: ${result.remoteHealth.repository}`,
+        `Remote: ${result.remoteHealth.remoteName}`,
+        `Provider: ${result.remoteHealth.provider}`,
+        `Default branch: ${result.remoteHealth.defaultBranch}`,
+        `Current branch: ${result.remoteHealth.currentBranch}`,
+        `Access: ${result.remoteHealth.access}`,
+        ...(result.remoteHealth.remoteHeadSha ? [`Remote HEAD: ${result.remoteHealth.remoteHeadSha}`] : []),
+        ...(result.remoteHealth.trackingBranch ? [`Tracking: ${result.remoteHealth.trackingBranch}`] : []),
+        ...(result.remoteHealth.ahead !== undefined && result.remoteHealth.behind !== undefined ? [`Ahead/behind: ${result.remoteHealth.ahead}/${result.remoteHealth.behind}`] : []),
+        ...(result.remoteHealth.githubAuthenticated !== undefined ? [`GitHub auth: ${result.remoteHealth.githubAuthenticated ? "available" : "unavailable"}`] : []),
+        ...(result.remoteHealth.githubViewer ? [`GitHub viewer: ${result.remoteHealth.githubViewer}`] : [])
+      ]
+    });
+  }
+  if (result.remoteEvidence) {
+    sections.push({
+      heading: "Remote Publication Evidence",
+      body: result.remoteEvidence.summary,
+      evidence: [
+        `Repository: ${result.remoteEvidence.repository}`,
+        `Remote: ${result.remoteEvidence.remoteName}`,
+        `Provider: ${result.remoteEvidence.provider}`,
+        `Branch: ${result.remoteEvidence.branchName}`,
+        `Publication: ${result.remoteEvidence.publicationState}`,
+        `Local commit: ${result.remoteEvidence.localCommitSha}`,
+        ...(result.remoteEvidence.remoteCommitSha ? [`Remote commit: ${result.remoteEvidence.remoteCommitSha}`] : []),
+        `PR: ${result.remoteEvidence.pullRequest.summary}`,
+        `Checks: ${result.remoteEvidence.checks.summary}`,
+        `Retryable: ${String(result.remoteEvidence.retryable)}`,
+        ...(result.remoteEvidence.retryReason ? [`Retry reason: ${result.remoteEvidence.retryReason}`] : []),
+        ...result.remoteEvidence.blockedActions.map((item) => `Blocked action: ${item}`)
+      ]
+    });
+  }
+  if (result.remoteMutationPolicy) {
+    sections.push({
+      heading: "Remote Mutation Policy",
+      body: result.remoteMutationPolicy.reason,
+      evidence: [
+        `Mutation: ${result.remoteMutationPolicy.mutationKind}`,
+        `Allowed: ${String(result.remoteMutationPolicy.allowed)}`,
+        `Actor: ${result.remoteMutationPolicy.actorRoleId}`,
+        `Branch: ${result.remoteMutationPolicy.branchName}`,
+        `Commit: ${result.remoteMutationPolicy.commitSha}`,
+        `Remote target: ${result.remoteMutationPolicy.remoteTarget}`,
+        `Base: ${result.remoteMutationPolicy.baseBranch}`,
+        `Permission allowed: ${String(result.remoteMutationPolicy.permissionAllowed)}`,
+        `Reviewed delivery present: ${String(result.remoteMutationPolicy.reviewedDeliveryPresent)}`,
+        ...(result.remoteMutationPolicy.reviewPacketId ? [`Review packet: ${result.remoteMutationPolicy.reviewPacketId}`] : []),
+        ...(result.remoteMutationPolicy.deliveryArtifactContentId ? [`Delivery artifact: ${result.remoteMutationPolicy.deliveryArtifactContentId}`] : []),
+        `Force push allowed: ${String(result.remoteMutationPolicy.forcePushAllowed)}`,
+        `Branch deletion allowed: ${String(result.remoteMutationPolicy.branchDeletionAllowed)}`,
+        ...result.remoteMutationPolicy.blockers.map((blocker) => `Blocker: ${blocker}`)
+      ]
+    });
+  }
+  if (result.branchPush) {
+    sections.push({
+      heading: "Branch Push",
+      body: result.branchPush.summary,
+      evidence: [
+        `Remote: ${result.branchPush.remoteName}`,
+        `Branch: ${result.branchPush.branchName}`,
+        `Commit: ${result.branchPush.commitSha}`,
+        `Tracking: ${result.branchPush.trackingBranch}`,
+        `Remote target: ${result.branchPush.remoteTarget}`
+      ]
+    });
+  }
+  if (result.draftPullRequest) {
+    sections.push({
+      heading: "Draft Pull Request",
+      body: result.draftPullRequest.summary,
+      evidence: [
+        `URL: ${result.draftPullRequest.url}`,
+        ...(result.draftPullRequest.number ? [`Number: ${result.draftPullRequest.number}`] : []),
+        `Base: ${result.draftPullRequest.baseBranch}`,
+        `Head: ${result.draftPullRequest.headBranch}`,
+        `Draft: ${String(result.draftPullRequest.draft)}`
+      ]
+    });
+  }
   if (result.commitSha) {
     sections.push({ heading: "Local Commit", body: `Local commit ${result.commitSha} was created.`, evidence: [`Commit: ${result.commitSha}`] });
   }
@@ -287,9 +490,23 @@ function isPolicyFailure(code: GitFailureCode): boolean {
   return code === "policy_denied" || code === "path_outside_workspace" || code === "secret_path" || code === "commit_disabled" || code === "remote_disabled";
 }
 
+function resultNeedsReviewedDelivery(kind: GitOperationRequest["kind"]): boolean {
+  return kind === "branch_push_policy" || kind === "draft_pr_policy" || kind === "branch_push" || kind === "draft_pr_create";
+}
+
+function requiresReviewedDeliveryBeforeExecution(kind: GitOperationRequest["kind"]): boolean {
+  return kind === "branch_push" || kind === "draft_pr_create";
+}
+
+function mutationLabel(kind: GitRemoteMutationPolicy["mutationKind"]): string {
+  return kind === "branch_push" ? "Branch push" : "Draft PR creation";
+}
+
 function errorCodeForPolicy(kind: GitOperationRequest["kind"], reason: string): GitFailureCode {
   if (reason.includes("inside an allowed workspace")) return "path_outside_workspace";
   if (reason.includes("denied")) return "secret_path";
+  if (kind === "remote_health" && reason.includes("remote read")) return "remote_disabled";
+  if ((kind === "branch_push" || kind === "draft_pr_create") && reason.includes("disabled")) return "remote_disabled";
   if (kind === "local_commit") return "commit_disabled";
   return "policy_denied";
 }

@@ -1,6 +1,6 @@
 # Next Implementation Plan: Phase 7 GitHub Repository Integration
 
-Status: In progress after repository bootstrap on 2026-06-19
+Status: Phase 7 G4 completed, ready for branch publication on 2026-06-19
 
 ## 1. Current Position
 
@@ -38,28 +38,38 @@ local reviewed delivery
 - completed: initialized the local repository with intentional first-commit scope;
 - completed: connected `origin` to `phetjaaeiei/AI-Agent`;
 - completed: verified default branch, repository access, and remote metadata;
-- remaining: expose remote-read health in Mission Control without storing credentials.
+- completed: exposed read-only remote health in Mission Control without storing credentials.
 
 ### Slice G2: Remote Mutation Policy
 
-- separate permissions for branch push and draft PR creation;
-- require an explicit reviewed delivery packet before push;
-- record actor, branch, commit SHA, remote target, and policy decision;
-- keep force push and branch deletion disabled.
+- completed: separate permissions for branch push and draft PR creation are reflected in policy preflight;
+- completed: policy preflight requires an explicit delivered review packet before a future remote mutation can pass;
+- completed: policy preflight records actor, branch, commit SHA, remote target, permission state, delivery evidence, blockers, and policy decision;
+- completed: force push and branch deletion remain disabled.
 
 ### Slice G3: Draft Pull Request Connector
 
-- push a `codex/*` branch with tracking;
-- create a draft PR through the connected GitHub app, with `gh` fallback;
-- attach local CI, reviewer decisions, risks, rollback notes, and delivery Markdown;
-- never auto-merge.
+- completed: added guarded `branch_push` execution that can push a `codex/*` branch with upstream tracking only after policy and reviewed delivery pass;
+- completed: added guarded `draft_pr_create` execution through `gh pr create --draft` after verifying the remote branch matches local HEAD;
+- completed: draft PR bodies are hydrated from the reviewed delivery Markdown, including local CI, reviewer decisions, risks, rollback notes, and remote safety notes;
+- completed: deterministic fixtures cover enabled branch push and fake draft PR creation without contacting GitHub;
+- completed: default policy still blocks branch push and draft PR creation.
 
 ### Slice G4: Mission Control Remote Evidence
 
-- show repository, branch, remote commit, PR status, checks, and blocked actions;
-- distinguish local-ready from remote-published states;
-- add retry for network/auth failures without repeating commits;
-- desktop and mobile rendered QA.
+- completed: added read-only `remote_evidence` operation for repository, branch, local commit, remote branch commit, PR state, check summary, blocked actions, and retry reason;
+- completed: distinguished `local_only`, `published_current`, `published_stale`, and `unknown` remote publication states;
+- completed: Mission Control shows remote publication evidence, PR status, checks, retryable state, and still-blocked merge/deploy/force-push/branch-deletion actions;
+- completed: network/auth/PR-status failures return retryable evidence without repeating commits or remote mutation;
+- completed: deterministic local and fake-GitHub fixture coverage.
+
+### Slice G5: Branch Publication And Draft PR
+
+- current next slice;
+- commit the completed Phase 7 changes on the existing `codex/*` branch;
+- push the branch to `origin`;
+- create a draft PR for human review;
+- do not merge, deploy, force push, delete branches, or run production actions.
 
 ## 5. Not In This Milestone
 

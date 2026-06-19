@@ -6,7 +6,19 @@ const roleIdSet = new Set<string>(ROLE_IDS);
 export const GIT_OPERATION_SCHEMA_VERSION = 1;
 export const GIT_OPERATION_STORE_SCHEMA_VERSION = 1;
 
-export const GIT_OPERATION_KINDS = ["status", "diff", "commit_plan", "local_commit", "pr_draft"] as const;
+export const GIT_OPERATION_KINDS = [
+  "status",
+  "diff",
+  "commit_plan",
+  "local_commit",
+  "pr_draft",
+  "remote_health",
+  "remote_evidence",
+  "branch_push_policy",
+  "draft_pr_policy",
+  "branch_push",
+  "draft_pr_create"
+] as const;
 
 export type GitOperationKind = (typeof GIT_OPERATION_KINDS)[number];
 
@@ -29,6 +41,7 @@ export type GitPolicySnapshot = {
   workspaceRoot: string;
   allowedWorkspaceRoots: readonly string[];
   allowGitRead: boolean;
+  allowRemoteRead: boolean;
   allowGitCommit: boolean;
   allowRemotePush: boolean;
   allowPullRequestCreate: boolean;
@@ -103,6 +116,120 @@ export type GitPullRequestDraft = {
   status: "integration_needed" | "ready_to_create";
 };
 
+export type GitRemoteAccessStatus = "ok" | "not_configured" | "unavailable" | "auth_required" | "error";
+
+export type GitRemoteProvider = "github" | "local" | "other" | "unknown";
+
+export type GitRemoteHealth = {
+  remoteName: string;
+  provider: GitRemoteProvider;
+  repository: string;
+  sanitizedUrl: string;
+  defaultBranch: string;
+  currentBranch: string;
+  localHeadSha: string;
+  remoteHeadSha?: string;
+  trackingBranch?: string;
+  ahead?: number;
+  behind?: number;
+  access: GitRemoteAccessStatus;
+  githubAuthenticated?: boolean;
+  githubViewer?: string;
+  checkedAt: string;
+  summary: string;
+};
+
+export type GitRemoteMutationKind = "branch_push" | "draft_pr";
+
+export type GitRemotePublicationState = "local_only" | "published_current" | "published_stale" | "unknown";
+
+export type GitRemotePullRequestState = "none" | "open" | "closed" | "merged" | "unknown";
+
+export type GitRemoteChecksState = "none" | "passing" | "pending" | "failing" | "unknown";
+
+export type GitRemotePullRequestEvidence = {
+  state: GitRemotePullRequestState;
+  url?: string;
+  number?: number;
+  title?: string;
+  draft?: boolean;
+  headBranch?: string;
+  baseBranch?: string;
+  mergeStateStatus?: string;
+  summary: string;
+};
+
+export type GitRemoteChecksEvidence = {
+  state: GitRemoteChecksState;
+  total: number;
+  passed: number;
+  pending: number;
+  failed: number;
+  summary: string;
+};
+
+export type GitRemoteEvidence = {
+  remoteName: string;
+  provider: GitRemoteProvider;
+  repository: string;
+  branchName: string;
+  defaultBranch: string;
+  localCommitSha: string;
+  remoteCommitSha?: string;
+  publicationState: GitRemotePublicationState;
+  pullRequest: GitRemotePullRequestEvidence;
+  checks: GitRemoteChecksEvidence;
+  blockedActions: readonly string[];
+  retryable: boolean;
+  retryReason?: string;
+  checkedAt: string;
+  summary: string;
+};
+
+export type GitRemoteMutationPolicy = {
+  mutationKind: GitRemoteMutationKind;
+  allowed: boolean;
+  reason: string;
+  actorRoleId: RoleId;
+  branchName: string;
+  commitSha: string;
+  remoteName: string;
+  remoteTarget: string;
+  baseBranch: string;
+  permissionAllowed: boolean;
+  reviewedDeliveryRequired: boolean;
+  reviewedDeliveryPresent: boolean;
+  reviewPacketId?: string;
+  deliveryArtifactContentId?: string;
+  forcePushAllowed: false;
+  branchDeletionAllowed: false;
+  blockers: readonly string[];
+  checkedAt: string;
+};
+
+export type GitBranchPushResult = {
+  remoteName: string;
+  branchName: string;
+  commitSha: string;
+  remoteTarget: string;
+  trackingBranch: string;
+  pushedAt: string;
+  summary: string;
+};
+
+export type GitDraftPullRequestResult = {
+  url: string;
+  number?: number;
+  title: string;
+  body: string;
+  baseBranch: string;
+  headBranch: string;
+  remoteTarget: string;
+  draft: true;
+  createdAt: string;
+  summary: string;
+};
+
 export type GitOperationRequest = {
   missionId: string;
   taskId: string;
@@ -112,6 +239,9 @@ export type GitOperationRequest = {
   baseBranch?: string;
   branchName?: string;
   commitMessage?: string;
+  reviewPacketId?: string;
+  pullRequestTitle?: string;
+  pullRequestBody?: string;
 };
 
 export type GitOperationResult = {
@@ -122,6 +252,11 @@ export type GitOperationResult = {
   diff?: GitDiffSummary;
   commitPlan?: GitCommitPlanOutput;
   prDraft?: GitPullRequestDraft;
+  remoteHealth?: GitRemoteHealth;
+  remoteEvidence?: GitRemoteEvidence;
+  remoteMutationPolicy?: GitRemoteMutationPolicy;
+  branchPush?: GitBranchPushResult;
+  draftPullRequest?: GitDraftPullRequestResult;
   commitSha?: string;
 };
 
@@ -181,7 +316,10 @@ export function isGitOperationRequest(value: unknown): value is GitOperationRequ
     (request.cwd === undefined || typeof request.cwd === "string") &&
     (request.baseBranch === undefined || typeof request.baseBranch === "string") &&
     (request.branchName === undefined || typeof request.branchName === "string") &&
-    (request.commitMessage === undefined || typeof request.commitMessage === "string")
+    (request.commitMessage === undefined || typeof request.commitMessage === "string") &&
+    (request.reviewPacketId === undefined || typeof request.reviewPacketId === "string") &&
+    (request.pullRequestTitle === undefined || typeof request.pullRequestTitle === "string") &&
+    (request.pullRequestBody === undefined || typeof request.pullRequestBody === "string")
   );
 }
 

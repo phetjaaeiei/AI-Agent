@@ -96,7 +96,7 @@ export async function startGitOperation(input: GitOperationRequest): Promise<Git
   const payload = await requestJson<unknown>("/api/mission/git-operations", {
     method: "POST",
     body: JSON.stringify(input)
-  });
+  }, 15_000);
   if (!isGitOperationRecord(payload)) throw new Error("Git operation response is invalid.");
   return payload;
 }
@@ -388,7 +388,9 @@ function validateGitPolicy(value: unknown): GitPolicySnapshot {
     typeof policy.workspaceRoot !== "string" ||
     !Array.isArray(policy.allowedWorkspaceRoots) ||
     typeof policy.allowGitRead !== "boolean" ||
+    typeof policy.allowRemoteRead !== "boolean" ||
     typeof policy.allowGitCommit !== "boolean" ||
+    typeof policy.allowRemotePush !== "boolean" ||
     typeof policy.allowPullRequestCreate !== "boolean"
   ) {
     throw new Error("Git policy response is missing required fields.");

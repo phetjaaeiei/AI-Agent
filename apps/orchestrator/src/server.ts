@@ -447,11 +447,13 @@ export function createDefaultToolCallService(
 export function createDefaultGitOperationService(
   store: MissionStore,
   artifactStore: ArtifactContentStore,
-  gitOperationStore: GitOperationStore
+  gitOperationStore: GitOperationStore,
+  reviewPacketStore?: ReviewPacketStore
 ): GitOperationService {
   const runner = new LocalGitRunner({
     workspaceRoot: process.env.TEAM_AI_AGENT_WORKSPACE_ROOT ?? process.cwd(),
     allowGitRead: process.env.TEAM_AI_AGENT_ALLOW_GIT_READ !== "false",
+    allowRemoteRead: process.env.TEAM_AI_AGENT_ALLOW_GIT_REMOTE_READ !== "false",
     allowGitCommit: process.env.TEAM_AI_AGENT_ALLOW_GIT_COMMIT === "true",
     allowRemotePush: process.env.TEAM_AI_AGENT_ALLOW_GIT_PUSH === "true",
     allowPullRequestCreate: process.env.TEAM_AI_AGENT_ALLOW_PR_CREATE === "true",
@@ -462,7 +464,8 @@ export function createDefaultGitOperationService(
     runner,
     operationStore: gitOperationStore,
     missionStore: store,
-    artifactStore
+    artifactStore,
+    ...(reviewPacketStore ? { reviewPacketStore } : {})
   });
 }
 
@@ -586,7 +589,7 @@ if (isEntrypoint) {
   const missionControllerStore = createDefaultFileMissionControllerStore();
   const toolCallService = createDefaultToolCallService(store, artifactStore, toolCallStore);
   const agentRunService = createDefaultAgentRunService(store, artifactStore, runStore);
-  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore);
+  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore, reviewPacketStore);
   const reviewPacketService = createDefaultReviewPacketService(
     store,
     artifactStore,

@@ -1541,6 +1541,48 @@ button:focus-visible {
   font-weight: 800;
 }
 
+.git-remote-policy,
+.git-remote-evidence {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: 8px 10px;
+}
+
+.git-remote-policy span,
+.git-remote-policy em,
+.git-remote-policy small,
+.git-remote-evidence span,
+.git-remote-evidence em,
+.git-remote-evidence small {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.git-remote-policy strong,
+.git-remote-evidence strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-remote-policy small,
+.git-remote-evidence small {
+  grid-column: 1 / -1;
+}
+
+.git-remote-evidence small {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .tool-actions,
 .git-actions {
   justify-content: flex-end;

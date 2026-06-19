@@ -41,6 +41,7 @@ const gitOperationStorePath = join(tempDir, "git-operations.json");
 const reviewPacketStorePath = join(tempDir, "review-packets.json");
 const missionControllerStorePath = join(tempDir, "mission-controllers.json");
 const workspacePath = join(tempDir, "workspace");
+const remotePath = join(tempDir, "workspace-origin.git");
 await mkdir(join(workspacePath, "docs"), { recursive: true });
 await writeFile(join(workspacePath, "docs", "plan.md"), "# Plan\n\nLocal tool evidence.\n", "utf8");
 await writeFile(join(workspacePath, ".env"), "SECRET=not-real\n", "utf8");
@@ -49,6 +50,11 @@ await git(["config", "user.name", "Team AI Agent"]);
 await git(["config", "user.email", "team-ai-agent@example.local"]);
 await git(["add", "docs/plan.md"]);
 await git(["commit", "-m", "Initial plan"]);
+await git(["branch", "-M", "main"]);
+await run("git", ["init", "--bare", remotePath]);
+await run("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: remotePath });
+await git(["remote", "add", "origin", remotePath]);
+await git(["push", "-u", "origin", "main"]);
 const store = new FileMissionStore(storePath, () => createDefaultOrchestratorSession("2026-06-18T10:00:00.000Z"));
 const artifactStore = new FileArtifactContentStore(artifactStorePath, () =>
   createDefaultOrchestratorArtifactContents("2026-06-18T10:00:00.000Z")
@@ -80,6 +86,7 @@ const gitOperationService = new GitOperationService({
   operationStore: gitOperationStore,
   missionStore: store,
   artifactStore,
+  reviewPacketStore,
   now: () => "2026-06-18T10:32:00.000Z"
 });
 const reviewPacketService = new ReviewPacketService({
@@ -135,6 +142,7 @@ try {
 
   const gitPolicy = await requestJson(`${baseUrl}/api/mission/git-policy`);
   assert(gitPolicy.workspaceRoot === workspacePath, "Git policy endpoint should expose the configured local workspace.");
+  assert(gitPolicy.allowRemoteRead === true, "Git policy should allow read-only remote health by default.");
   assert(gitPolicy.allowGitCommit === false, "Git policy should block local commits by default.");
   assert(gitPolicy.allowPullRequestCreate === false, "Git policy should block PR creation by default.");
 
@@ -281,6 +289,88 @@ try {
     })
   });
   assert(gitPrDraft.result.prDraft.status === "integration_needed", "PR draft should remain offline when PR creation is disabled.");
+  const gitRemoteHealth = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-remote-health",
+      roleId: "devops_lead",
+      kind: "remote_health",
+      baseBranch: "main"
+    })
+  });
+  assert(gitRemoteHealth.status === "completed", "Git remote-health endpoint should complete.");
+  assert(gitRemoteHealth.result.remoteHealth.access === "ok", "Git remote-health endpoint should report reachable origin access.");
+  assert(gitRemoteHealth.artifactContentId, "Git remote-health should create evidence artifact through the HTTP boundary.");
+  const gitRemoteEvidence = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-remote-evidence",
+      roleId: "release_manager",
+      kind: "remote_evidence",
+      baseBranch: "main",
+      branchName: "main"
+    })
+  });
+  assert(gitRemoteEvidence.status === "completed", "Git remote evidence endpoint should complete.");
+  assert(gitRemoteEvidence.result.remoteEvidence.publicationState === "published_current", "Git remote evidence should compare local and remote branch commits.");
+  assert(gitRemoteEvidence.result.remoteEvidence.blockedActions.some((item) => item.includes("Merge")), "Git remote evidence should keep merge blocked.");
+  assert(gitRemoteEvidence.artifactContentId, "Git remote evidence should create artifact evidence through the HTTP boundary.");
+  const gitBranchPushPolicy = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-branch-push-policy",
+      roleId: "release_manager",
+      kind: "branch_push_policy",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(gitBranchPushPolicy.status === "completed", "Branch push policy endpoint should complete without pushing.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.allowed === false, "Branch push policy endpoint should stay blocked by default.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.blockers.some((item) => item.includes("Explicit reviewPacketId")), "Branch push policy should require explicit reviewed delivery evidence.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.forcePushAllowed === false, "Branch push policy should keep force push disabled.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.branchDeletionAllowed === false, "Branch push policy should keep branch deletion disabled.");
+  const gitDraftPrPolicy = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-draft-pr-policy",
+      roleId: "release_manager",
+      kind: "draft_pr_policy",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(gitDraftPrPolicy.status === "completed", "Draft PR policy endpoint should complete without creating a PR.");
+  assert(gitDraftPrPolicy.result.remoteMutationPolicy.allowed === false, "Draft PR policy endpoint should stay blocked by default.");
+  assert(gitDraftPrPolicy.result.remoteMutationPolicy.blockers.some((item) => item.includes("Draft PR creation is disabled")), "Draft PR policy should record disabled PR permission.");
+  const blockedBranchPush = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-branch-push",
+      roleId: "release_manager",
+      kind: "branch_push",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(blockedBranchPush.status === "blocked" && blockedBranchPush.errorCode === "remote_disabled", "Branch push endpoint should be blocked by default.");
+  const blockedDraftPrCreate = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-draft-pr-create",
+      roleId: "release_manager",
+      kind: "draft_pr_create",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(blockedDraftPrCreate.status === "blocked" && blockedDraftPrCreate.errorCode === "remote_disabled", "Draft PR creation endpoint should be blocked by default.");
   const blockedGitCommit = await requestJson(`${baseUrl}/api/mission/git-operations`, {
     method: "POST",
     body: JSON.stringify({
@@ -294,7 +384,7 @@ try {
   const fetchedGitOperation = await requestJson(`${baseUrl}/api/mission/git-operations/${encodeURIComponent(gitPlan.id)}`);
   assert(fetchedGitOperation.id === gitPlan.id, "Git operation detail endpoint should fetch by id.");
   const listedGitOperations = await requestJson(`${baseUrl}/api/mission/git-operations?missionId=${encodeURIComponent(initialSession.missionId)}`);
-  assert(listedGitOperations.length === 5, "Git operation list endpoint should return mission Git operations.");
+  assert(listedGitOperations.length === 11, "Git operation list endpoint should return mission Git operations.");
 
   const reviewPacket = await requestJson(`${baseUrl}/api/mission/review-packets`, {
     method: "POST",

@@ -24,6 +24,7 @@ import {
   Sparkles,
   Square,
   TestTube2,
+  Upload,
   UsersRound,
   X,
   Zap
@@ -728,7 +729,13 @@ const gitOperationKindLabel: Record<GitOperationRecord["kind"], string> = {
   diff: "Diff",
   commit_plan: "Commit plan",
   local_commit: "Local commit",
-  pr_draft: "PR draft"
+  pr_draft: "PR draft",
+  remote_health: "Remote health",
+  remote_evidence: "Remote evidence",
+  branch_push_policy: "Push policy",
+  draft_pr_policy: "PR policy",
+  branch_push: "Branch push",
+  draft_pr_create: "Draft PR create"
 };
 
 const initialAgentRuntimeInfo: AgentRuntimeInfo = {
@@ -762,6 +769,7 @@ const initialGitPolicy: GitPolicySnapshot = {
   workspaceRoot: "local workspace",
   allowedWorkspaceRoots: [],
   allowGitRead: false,
+  allowRemoteRead: false,
   allowGitCommit: false,
   allowRemotePush: false,
   allowPullRequestCreate: false,
@@ -891,6 +899,20 @@ function artifactSourceLabel(source: RuntimeArtifactContent["source"]): string {
 
 function gitOperationSummary(operation: GitOperationRecord): string {
   if (operation.errorSummary) return operation.errorSummary;
+  if (operation.result?.draftPullRequest) return operation.result.draftPullRequest.url;
+  if (operation.result?.branchPush) return `${operation.result.branchPush.branchName} pushed`;
+  if (operation.result?.remoteEvidence) {
+    const evidence = operation.result.remoteEvidence;
+    return `${evidence.publicationState.replaceAll("_", " ")}; ${evidence.pullRequest.state === "none" ? "no PR" : evidence.pullRequest.state}`;
+  }
+  if (operation.result?.remoteMutationPolicy) {
+    const policy = operation.result.remoteMutationPolicy;
+    return policy.allowed ? `${policy.branchName} ready` : `${policy.blockers.length} blockers`;
+  }
+  if (operation.result?.remoteHealth) {
+    const health = operation.result.remoteHealth;
+    return health.access === "ok" ? `${health.repository} reachable` : health.access.replaceAll("_", " ");
+  }
   if (operation.result?.commitPlan) {
     return operation.result.commitPlan.ready
       ? `${operation.result.commitPlan.changedFiles.length} files ready`
@@ -1550,6 +1572,86 @@ export function App() {
     });
   }
 
+  function checkRemoteHealth() {
+    void executeGitOperation({
+      taskId: "task-git-remote-health",
+      roleId: "devops_lead",
+      kind: "remote_health",
+      baseBranch: "main"
+    });
+  }
+
+  function checkRemoteEvidence() {
+    void executeGitOperation({
+      taskId: "task-git-remote-evidence",
+      roleId: "release_manager",
+      kind: "remote_evidence",
+      baseBranch: "main",
+      branchName: proposedRemoteBranchName()
+    });
+  }
+
+  function latestReviewPacketForRemotePolicy(): ReviewPacket | undefined {
+    return reviewPackets.find((packet) => packet.status === "delivered") ?? reviewPackets[0];
+  }
+
+  function proposedRemoteBranchName(): string {
+    const latestMutationBranch = gitOperations.find((operation) => operation.result?.remoteMutationPolicy?.branchName)?.result?.remoteMutationPolicy?.branchName;
+    const latestWorktreeBranch = gitOperations.find((operation) => operation.result?.worktree?.branch)?.result?.worktree?.branch;
+    const latestPlanBranch = gitOperations.find((operation) => operation.result?.commitPlan?.branchName)?.result?.commitPlan?.branchName;
+    if (latestMutationBranch?.startsWith("codex/")) return latestMutationBranch;
+    if (latestWorktreeBranch?.startsWith("codex/")) return latestWorktreeBranch;
+    return latestPlanBranch ?? "codex/phase-7-remote-mutation-policy";
+  }
+
+  function checkBranchPushPolicy() {
+    const packet = latestReviewPacketForRemotePolicy();
+    void executeGitOperation({
+      taskId: "task-git-branch-push-policy",
+      roleId: "release_manager",
+      kind: "branch_push_policy",
+      baseBranch: "main",
+      branchName: proposedRemoteBranchName(),
+      ...(packet ? { reviewPacketId: packet.id } : {})
+    });
+  }
+
+  function checkDraftPrPolicy() {
+    const packet = latestReviewPacketForRemotePolicy();
+    void executeGitOperation({
+      taskId: "task-git-draft-pr-policy",
+      roleId: "release_manager",
+      kind: "draft_pr_policy",
+      baseBranch: "main",
+      branchName: proposedRemoteBranchName(),
+      ...(packet ? { reviewPacketId: packet.id } : {})
+    });
+  }
+
+  function pushRemoteBranch() {
+    const packet = latestReviewPacketForRemotePolicy();
+    void executeGitOperation({
+      taskId: "task-git-branch-push",
+      roleId: "release_manager",
+      kind: "branch_push",
+      baseBranch: "main",
+      branchName: proposedRemoteBranchName(),
+      ...(packet ? { reviewPacketId: packet.id } : {})
+    });
+  }
+
+  function createDraftPr() {
+    const packet = latestReviewPacketForRemotePolicy();
+    void executeGitOperation({
+      taskId: "task-git-draft-pr-create",
+      roleId: "release_manager",
+      kind: "draft_pr_create",
+      baseBranch: "main",
+      branchName: proposedRemoteBranchName(),
+      ...(packet ? { reviewPacketId: packet.id } : {})
+    });
+  }
+
   async function executeReviewAction(label: string, action: () => Promise<ReviewPacket>) {
     if (isReviewRunning) return;
     setIsReviewRunning(true);
@@ -1659,8 +1761,14 @@ export function App() {
             onRetryAgentRun={retryActiveAgentRun}
             onRetryMissionController={retryActiveMissionController}
             onBuildCommitPlan={buildCommitPlan}
+            onCheckBranchPushPolicy={checkBranchPushPolicy}
+            onCheckDraftPrPolicy={checkDraftPrPolicy}
             onCheckGitStatus={checkGitStatus}
+            onCheckRemoteEvidence={checkRemoteEvidence}
+            onCheckRemoteHealth={checkRemoteHealth}
+            onCreateDraftPr={createDraftPr}
             onDraftPullRequest={draftPullRequest}
+            onPushRemoteBranch={pushRemoteBranch}
             onApproveReviewRole={approveReviewRole}
             onCreateDeliveryReport={generateDeliveryReport}
             onCreateReviewPacket={startReviewPacket}
@@ -2095,8 +2203,14 @@ function MissionInspector({
   reviewPackets,
   onApproveReviewRole,
   onBuildCommitPlan,
+  onCheckBranchPushPolicy,
+  onCheckDraftPrPolicy,
   onCheckGitStatus,
+  onCheckRemoteEvidence,
+  onCheckRemoteHealth,
+  onCreateDraftPr,
   onDraftPullRequest,
+  onPushRemoteBranch,
   onCreateDeliveryReport,
   onCreateReviewPacket,
   onRefreshReviewPacket,
@@ -2141,8 +2255,14 @@ function MissionInspector({
   reviewPackets: readonly ReviewPacket[];
   onApproveReviewRole: (roleId: RoleId) => void;
   onBuildCommitPlan: () => void | Promise<void>;
+  onCheckBranchPushPolicy: () => void | Promise<void>;
+  onCheckDraftPrPolicy: () => void | Promise<void>;
   onCheckGitStatus: () => void | Promise<void>;
+  onCheckRemoteEvidence: () => void | Promise<void>;
+  onCheckRemoteHealth: () => void | Promise<void>;
+  onCreateDraftPr: () => void | Promise<void>;
   onDraftPullRequest: () => void | Promise<void>;
+  onPushRemoteBranch: () => void | Promise<void>;
   onCreateDeliveryReport: () => void | Promise<void>;
   onCreateReviewPacket: () => void | Promise<void>;
   onRefreshReviewPacket: () => void | Promise<void>;
@@ -2212,8 +2332,14 @@ function MissionInspector({
       <GitIntegrationCard
         isRunning={isGitRunning}
         onBuildCommitPlan={onBuildCommitPlan}
+        onCheckBranchPushPolicy={onCheckBranchPushPolicy}
+        onCheckDraftPrPolicy={onCheckDraftPrPolicy}
         onCheckStatus={onCheckGitStatus}
+        onCheckRemoteEvidence={onCheckRemoteEvidence}
+        onCheckRemoteHealth={onCheckRemoteHealth}
+        onCreateDraftPr={onCreateDraftPr}
         onDraftPullRequest={onDraftPullRequest}
+        onPushRemoteBranch={onPushRemoteBranch}
         operations={gitOperations}
         policy={gitPolicy}
       />
@@ -2580,20 +2706,35 @@ function ToolEvidenceCard({
 function GitIntegrationCard({
   isRunning,
   onBuildCommitPlan,
+  onCheckBranchPushPolicy,
+  onCheckDraftPrPolicy,
   onCheckStatus,
+  onCheckRemoteEvidence,
+  onCheckRemoteHealth,
+  onCreateDraftPr,
   onDraftPullRequest,
+  onPushRemoteBranch,
   operations,
   policy
 }: {
   isRunning: boolean;
   onBuildCommitPlan: () => void | Promise<void>;
+  onCheckBranchPushPolicy: () => void | Promise<void>;
+  onCheckDraftPrPolicy: () => void | Promise<void>;
   onCheckStatus: () => void | Promise<void>;
+  onCheckRemoteEvidence: () => void | Promise<void>;
+  onCheckRemoteHealth: () => void | Promise<void>;
+  onCreateDraftPr: () => void | Promise<void>;
   onDraftPullRequest: () => void | Promise<void>;
+  onPushRemoteBranch: () => void | Promise<void>;
   operations: readonly GitOperationRecord[];
   policy: GitPolicySnapshot;
 }) {
-  const latestOperations = operations.slice(0, 3);
+  const latestOperations = operations.slice(0, 4);
   const latestWorktree = operations.find((operation) => operation.result?.worktree)?.result?.worktree;
+  const latestRemote = operations.find((operation) => operation.result?.remoteHealth)?.result?.remoteHealth;
+  const latestRemoteEvidence = operations.find((operation) => operation.result?.remoteEvidence)?.result?.remoteEvidence;
+  const latestRemotePolicy = operations.find((operation) => operation.result?.remoteMutationPolicy)?.result?.remoteMutationPolicy;
   const workspaceLabel = formatWorkspaceLabel(policy.workspaceRoot);
 
   return (
@@ -2603,23 +2744,60 @@ function GitIntegrationCard({
         <h3>Git Integration</h3>
       </div>
       <div className="git-policy-row">
-        <span>{latestWorktree ? latestWorktree.branch : workspaceLabel}</span>
-        <strong>{policy.allowGitCommit ? "Commit on" : "Commit off"}</strong>
+        <span>{latestRemote ? latestRemote.repository : latestWorktree ? latestWorktree.branch : workspaceLabel}</span>
+        <strong>{latestRemote ? (latestRemote.access === "ok" ? "Remote ok" : "Remote blocked") : policy.allowGitCommit ? "Commit on" : "Commit off"}</strong>
       </div>
       <div className="git-policy-facts" aria-label="Git policy summary">
         <span>{policy.allowGitRead ? "Read allowed" : "Read off"}</span>
+        <span>{policy.allowRemoteRead ? "Remote read on" : "Remote read off"}</span>
+        <span>{policy.allowRemotePush ? "Remote push on" : "Remote push off"}</span>
         <span>{policy.allowPullRequestCreate ? "PR create on" : "PR draft only"}</span>
-        <span>{latestWorktree ? `${latestWorktree.files.length} changed` : "Not checked"}</span>
+        <span>{latestRemote ? `${latestRemote.currentBranch} -> ${latestRemote.defaultBranch}` : latestWorktree ? `${latestWorktree.files.length} changed` : "Not checked"}</span>
       </div>
+      {latestRemotePolicy ? (
+        <div className="git-remote-policy" aria-label="Remote mutation policy summary">
+          <span>{latestRemotePolicy.allowed ? "Remote policy ready" : "Remote policy blocked"}</span>
+          <strong>{latestRemotePolicy.branchName}</strong>
+          <em>{latestRemotePolicy.reviewedDeliveryPresent ? "Delivery reviewed" : "Delivery required"}</em>
+          <small>Force push off, deletion off</small>
+        </div>
+      ) : null}
+      {latestRemoteEvidence ? (
+        <div className="git-remote-evidence" aria-label="Remote publication evidence summary">
+          <span>{latestRemoteEvidence.publicationState.replaceAll("_", " ")}</span>
+          <strong>{latestRemoteEvidence.branchName}</strong>
+          <em>{latestRemoteEvidence.pullRequest.state === "none" ? "No PR" : `${latestRemoteEvidence.pullRequest.draft ? "Draft " : ""}PR ${latestRemoteEvidence.pullRequest.state}`}</em>
+          <em>{latestRemoteEvidence.checks.state === "none" ? "Checks unavailable" : `Checks ${latestRemoteEvidence.checks.state}`}</em>
+          <small>{latestRemoteEvidence.retryable ? `Retry: ${latestRemoteEvidence.retryReason}` : "Merge off, deploy off, force push off, deletion off"}</small>
+        </div>
+      ) : null}
       <div className="git-actions">
         <button type="button" disabled={isRunning || !policy.allowGitRead} onClick={() => void onCheckStatus()}>
           <GitBranch size={13} /> Check status
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead} onClick={() => void onCheckRemoteHealth()}>
+          <CloudCog size={13} /> Check remote
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead} onClick={() => void onCheckRemoteEvidence()}>
+          <Search size={13} /> {latestRemoteEvidence?.retryable ? "Retry evidence" : "Check evidence"}
         </button>
         <button type="button" disabled={isRunning || !policy.allowGitRead} onClick={() => void onBuildCommitPlan()}>
           <ClipboardCheck size={13} /> Build commit plan
         </button>
         <button type="button" disabled={isRunning || !policy.allowGitRead} onClick={() => void onDraftPullRequest()}>
           <FileText size={13} /> Draft PR
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead} onClick={() => void onCheckBranchPushPolicy()}>
+          <Upload size={13} /> Check push
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead} onClick={() => void onCheckDraftPrPolicy()}>
+          <ClipboardCheck size={13} /> Check PR policy
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead || !policy.allowRemotePush} onClick={() => void onPushRemoteBranch()}>
+          <Upload size={13} /> Push branch
+        </button>
+        <button type="button" disabled={isRunning || !policy.allowGitRead || !policy.allowRemoteRead || !policy.allowPullRequestCreate} onClick={() => void onCreateDraftPr()}>
+          <FileText size={13} /> Create draft PR
         </button>
       </div>
       {latestOperations.length > 0 ? (
