@@ -1,0 +1,36 @@
+{
+  "name": "team-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 apps/web",
+    "dev:orchestrator": "npm run build && node dist/apps/orchestrator/src/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "build:web": "vite build apps/web",
+    "verify:foundation": "npm run build && node scripts/verify/foundation.mjs",
+    "verify:orchestrator": "npm run build && node scripts/verify/orchestrator.mjs",
+    "verify:agent-runtime": "npm run build && node scripts/verify/agent-runtime.mjs",
+    "verify:tool-runner": "npm run build && node scripts/verify/tool-runner.mjs",
+    "verify:git-runner": "npm run build && node scripts/verify/git-runner.mjs",
+    "verify:review-packet": "npm run build && node scripts/verify/review-packet.mjs",
+    "verify:mission-controller": "npm run build && node scripts/verify/mission-controller.mjs",
+    "verify:ollama": "npm run build && node scripts/verify/ollama.mjs",
+    "eval:agent-runtime": "npm run build && node evals/agent-runtime/run.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "playwright": "^1.61.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "lucide-react": "^1.20.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

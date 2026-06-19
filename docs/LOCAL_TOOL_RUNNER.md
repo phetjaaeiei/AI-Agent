@@ -1,0 +1,74 @@
+# Local Tool Runner
+
+Date: 2026-06-19
+
+## Purpose
+
+Phase 3 adds local workspace execution without enabling Git, remote APIs, deployment, or arbitrary shell access. The tool runner is a policy-controlled execution layer for evidence, patches, and test results.
+
+## Runtime Shape
+
+```txt
+Mission Control
+  -> POST /api/mission/tool-calls
+  -> ToolCallService
+  -> LocalToolRunner
+  -> FileToolCallStore
+  -> ArtifactContentStore
+  -> Mission session audit/activity
+```
+
+## Tools
+
+- `file_read`: reads a file inside the configured workspace and records byte count plus SHA-256 evidence.
+- `file_write`: writes a file inside the workspace and creates a `Local Code Patch` artifact with a bounded unified patch.
+- `shell_command`: runs only allowlisted local commands through `spawn` with `shell: false`.
+- `test_command`: runs allowlisted test/check/build commands and creates test evidence artifacts.
+
+## Default Policy
+
+The default orchestrator policy is local only:
+
+- workspace root: `TEAM_AI_AGENT_WORKSPACE_ROOT` or `process.cwd()`;
+- denied paths: `.env`, `.git`, `.data`, `node_modules`, `dist`, `coverage`, private key patterns;
+- shell metacharacters are blocked;
+- commands run without a shell;
+- environment is reduced to `PATH`, `HOME`, `CI=1`, and `NO_COLOR=1`;
+- timeout defaults to 30 seconds.
+
+Runtime env switches:
+
+- `TEAM_AI_AGENT_ALLOW_FILE_READ=false`
+- `TEAM_AI_AGENT_ALLOW_FILE_WRITE=false`
+- `TEAM_AI_AGENT_ALLOW_SHELL=false`
+- `TEAM_AI_AGENT_ALLOW_TEST_COMMAND=false`
+- `TEAM_AI_AGENT_TOOL_TIMEOUT_MS=30000`
+- `TEAM_AI_AGENT_TOOL_CALL_STORE_PATH=.data/tool-calls.json`
+
+## API
+
+- `GET /api/mission/tool-policy`
+- `GET /api/mission/tool-calls?missionId=...`
+- `POST /api/mission/tool-calls`
+- `GET /api/mission/tool-calls/:toolCallId`
+
+Example body:
+
+```json
+{
+  "missionId": "bench_multi_role_full_feature",
+  "taskId": "task-local-typecheck",
+  "roleId": "automation_qa",
+  "kind": "test_command",
+  "command": "npm run typecheck"
+}
+```
+
+## Verification
+
+- `npm run verify:tool-runner`
+- `npm run verify:orchestrator`
+- `npm run typecheck`
+- `npm run build:web`
+
+The verification covers file read, denied secret paths, outside-workspace paths, file write patch artifacts, passing test evidence, failing test evidence, command blocking, persistence, reset, and HTTP endpoints.

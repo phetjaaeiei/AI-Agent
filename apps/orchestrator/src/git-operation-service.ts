@@ -1,0 +1,304 @@
+import { randomUUID } from "node:crypto";
+import type { GitRunner } from "../../../packages/git-runner/src/index.js";
+import { GitExecutionError } from "../../../packages/git-runner/src/index.js";
+import type {
+  GitFailureCode,
+  GitOperationRecord,
+  GitOperationRequest,
+  GitOperationResult,
+  GitPolicyDecision,
+  GitPolicySnapshot
+} from "../../../packages/shared/src/index.js";
+import {
+  createRuntimeArtifactRecord,
+  createRuntimeAuditEvent,
+  createRuntimeSessionSnapshot
+} from "../../../packages/workflow/src/index.js";
+import type { RuntimeActivityEvent, RuntimeArtifactContent, RuntimeArtifactSection } from "../../../packages/workflow/src/index.js";
+import type { ArtifactContentStore } from "./artifact-content-store.js";
+import type { MissionStore } from "./mission-store.js";
+import type { GitOperationStore } from "./git-operation-store.js";
+
+type GitOperationServiceOptions = {
+  runner: GitRunner;
+  operationStore: GitOperationStore;
+  missionStore: MissionStore;
+  artifactStore: ArtifactContentStore;
+  now?: () => string;
+};
+
+export class GitOperationService {
+  private readonly now: () => string;
+
+  constructor(private readonly options: GitOperationServiceOptions) {
+    this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  getPolicy(): GitPolicySnapshot {
+    return this.options.runner.getPolicy();
+  }
+
+  listOperations(missionId?: string): Promise<GitOperationRecord[]> {
+    return this.options.operationStore.listOperations(missionId);
+  }
+
+  getOperation(operationId: string): Promise<GitOperationRecord | undefined> {
+    return this.options.operationStore.findOperation(operationId);
+  }
+
+  async executeOperation(input: GitOperationRequest): Promise<GitOperationRecord> {
+    const requestedAt = this.now();
+    const id = `git-op-${randomUUID()}`;
+    const executionRequest = { ...input, id };
+    const policy = this.evaluatePolicy(executionRequest);
+    const initial: GitOperationRecord = {
+      schemaVersion: 1,
+      id,
+      missionId: input.missionId,
+      taskId: input.taskId,
+      roleId: input.roleId,
+      kind: input.kind,
+      status: policy.allowed ? "queued" : "blocked",
+      policy,
+      requestedAt,
+      updatedAt: requestedAt,
+      ...(input.cwd ? { cwd: input.cwd } : {})
+    };
+    let operation = await this.options.operationStore.upsertOperation(initial);
+
+    if (!policy.allowed) {
+      operation = await this.patchOperation(operation, {
+        status: "blocked",
+        errorCode: errorCodeForPolicy(input.kind, policy.reason),
+        errorSummary: policy.reason,
+        completedAt: this.now(),
+        updatedAt: this.now()
+      });
+      await this.persistSessionEvidence(operation);
+      return operation;
+    }
+
+    operation = await this.patchOperation(operation, { status: "running", startedAt: this.now(), updatedAt: this.now() });
+    await this.persistSessionEvidence(operation);
+
+    try {
+      const result = await this.options.runner.execute(executionRequest);
+      const artifact = shouldCreateArtifact(operation, result) ? await this.persistGitArtifact(operation, result) : undefined;
+      operation = await this.patchOperation(operation, {
+        status: "completed",
+        result,
+        ...(artifact ? { artifactRecordId: artifact.artifactRecordId, artifactContentId: artifact.id } : {}),
+        completedAt: this.now(),
+        updatedAt: this.now()
+      });
+      await this.persistSessionEvidence(operation);
+      return operation;
+    } catch (error) {
+      const normalized = normalizeGitError(error);
+      operation = await this.patchOperation(operation, {
+        status: isPolicyFailure(normalized.code) ? "blocked" : "failed",
+        errorCode: normalized.code,
+        errorSummary: normalized.message,
+        completedAt: this.now(),
+        updatedAt: this.now()
+      });
+      await this.persistSessionEvidence(operation);
+      return operation;
+    }
+  }
+
+  private evaluatePolicy(input: GitOperationRequest & { id: string }): GitPolicyDecision {
+    try {
+      return this.options.runner.evaluate(input);
+    } catch (error) {
+      return { allowed: false, reason: error instanceof Error ? error.message : "Git request failed policy evaluation." };
+    }
+  }
+
+  private patchOperation(operation: GitOperationRecord, patch: Partial<GitOperationRecord>): Promise<GitOperationRecord> {
+    return this.options.operationStore.upsertOperation({ ...operation, ...patch });
+  }
+
+  private async persistGitArtifact(operation: GitOperationRecord, result: GitOperationResult): Promise<RuntimeArtifactContent> {
+    const createdAt = this.now();
+    const current = await this.options.missionStore.readSession();
+    const artifactId = artifactIdForOperation(operation);
+    const artifactRecord = createRuntimeArtifactRecord({
+      artifactId,
+      taskId: operation.taskId,
+      title: artifactTitleForOperation(operation),
+      summary: result.summary,
+      ownerRoleId: operation.roleId,
+      gateId: "implementation_gate",
+      status: operation.kind === "commit_plan" && result.commitPlan?.ready ? "verified" : "reviewing",
+      version: current.artifactRecords.filter((item) => item.artifactId === artifactId).length + 1,
+      createdAt
+    });
+    const sections = sectionsForGitResult(operation, result);
+    const artifact: RuntimeArtifactContent = {
+      schemaVersion: 1,
+      id: `artifact-content-${artifactId}-${operation.id}`,
+      artifactRecordId: artifactRecord.id,
+      artifactId: artifactRecord.artifactId,
+      taskId: artifactRecord.taskId,
+      missionId: operation.missionId,
+      title: artifactRecord.title,
+      summary: artifactRecord.summary,
+      ownerRoleId: artifactRecord.ownerRoleId,
+      gateId: artifactRecord.gateId,
+      status: artifactRecord.status,
+      version: artifactRecord.version,
+      format: "markdown",
+      source: "git_runner",
+      sections,
+      markdown: formatMarkdown(artifactRecord.title, sections),
+      createdAt,
+      updatedAt: createdAt
+    };
+    await this.options.artifactStore.appendArtifact(artifact);
+    await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
+      ...current,
+      selection: {
+        ...current.selection,
+        selectedGateId: artifactRecord.gateId,
+        selectedRoleId: artifactRecord.ownerRoleId,
+        selectedRoomId: "engineering",
+        selectedArtifactId: artifactRecord.artifactId
+      },
+      artifactRecords: [artifactRecord, ...current.artifactRecords].slice(0, 100),
+      savedAt: createdAt
+    }));
+    return artifact;
+  }
+
+  private async persistSessionEvidence(operation: GitOperationRecord): Promise<void> {
+    const current = await this.options.missionStore.readSession();
+    const createdAt = this.now();
+    const severity = operation.status === "completed" ? "success" : operation.status === "blocked" || operation.status === "failed" ? "warning" : "info";
+    const tone: RuntimeActivityEvent["tone"] = severity === "success" ? "success" : severity === "warning" ? "warning" : "info";
+    const audit = createRuntimeAuditEvent({
+      id: `audit-git-operation-${operation.id}-${operation.status}`,
+      actorRoleId: operation.roleId,
+      action: operation.status === "completed" ? "git_operation_completed" : operation.status === "failed" || operation.status === "blocked" ? "git_operation_failed" : "git_operation_started",
+      summary: operation.errorSummary ?? operation.result?.summary ?? operation.policy.reason,
+      severity,
+      entityId: operation.id,
+      createdAt
+    });
+    await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
+      ...current,
+      runtime: {
+        ...current.runtime,
+        activityLog: [{
+          id: `evt-git-operation-${operation.id}-${operation.status}`,
+          roleId: operation.roleId,
+          type: "tool" as const,
+          title: titleForStatus(operation),
+          summary: operation.errorSummary ?? operation.result?.summary ?? operation.policy.reason,
+          tone,
+          time: formatTime(createdAt)
+        }, ...current.runtime.activityLog].slice(0, 80)
+      },
+      auditEvents: [audit, ...current.auditEvents].slice(0, 200),
+      savedAt: createdAt
+    }));
+  }
+}
+
+function shouldCreateArtifact(operation: GitOperationRecord, result: GitOperationResult): boolean {
+  return operation.kind === "diff" || operation.kind === "commit_plan" || operation.kind === "pr_draft" || operation.kind === "local_commit" || Boolean(result.diff?.diff);
+}
+
+function artifactIdForOperation(operation: GitOperationRecord): string {
+  if (operation.kind === "pr_draft") return `art-pr-draft-${operation.id}`;
+  if (operation.kind === "local_commit") return `art-local-commit-${operation.id}`;
+  if (operation.kind === "commit_plan") return `art-commit-plan-${operation.id}`;
+  return `art-git-diff-${operation.id}`;
+}
+
+function artifactTitleForOperation(operation: GitOperationRecord): string {
+  if (operation.kind === "pr_draft") return "Pull Request Draft";
+  if (operation.kind === "local_commit") return "Local Commit Evidence";
+  if (operation.kind === "commit_plan") return "Git Commit Plan";
+  return "Git Diff Evidence";
+}
+
+function sectionsForGitResult(operation: GitOperationRecord, result: GitOperationResult): RuntimeArtifactSection[] {
+  const sections: RuntimeArtifactSection[] = [
+    {
+      heading: "Git Operation",
+      body: `${operation.kind.replaceAll("_", " ")} executed by ${operation.roleId}.`,
+      evidence: result.evidence
+    }
+  ];
+  if (result.worktree) {
+    sections.push({
+      heading: "Worktree",
+      body: result.worktree.summary,
+      evidence: [`Branch: ${result.worktree.branch}`, `HEAD: ${result.worktree.headSha}`, `Clean: ${String(result.worktree.isClean)}`]
+    });
+  }
+  if (result.diff) {
+    sections.push({
+      heading: "Diff Summary",
+      body: `${result.diff.changedFiles} file(s), ${result.diff.insertions} insertion(s), ${result.diff.deletions} deletion(s).`,
+      evidence: result.diff.files.map((file) => `${file.path}: +${file.insertions}/-${file.deletions}`)
+    });
+  }
+  if (result.commitPlan) {
+    sections.push({
+      heading: "Commit Plan",
+      body: result.commitPlan.summary,
+      evidence: [
+        `Branch: ${result.commitPlan.branchName}`,
+        `Message: ${result.commitPlan.commitMessage}`,
+        `Ready: ${String(result.commitPlan.ready)}`,
+        ...result.commitPlan.risks
+      ]
+    });
+  }
+  if (result.prDraft) {
+    sections.push({
+      heading: "PR Draft",
+      body: result.prDraft.body,
+      evidence: [`Title: ${result.prDraft.title}`, `Status: ${result.prDraft.status}`, `Base: ${result.prDraft.baseBranch}`, `Head: ${result.prDraft.headBranch}`]
+    });
+  }
+  if (result.commitSha) {
+    sections.push({ heading: "Local Commit", body: `Local commit ${result.commitSha} was created.`, evidence: [`Commit: ${result.commitSha}`] });
+  }
+  return sections;
+}
+
+function titleForStatus(operation: GitOperationRecord): string {
+  if (operation.status === "completed") return "Git operation completed";
+  if (operation.status === "failed") return "Git operation failed";
+  if (operation.status === "blocked") return "Git operation blocked";
+  if (operation.status === "running") return "Git operation running";
+  return "Git operation queued";
+}
+
+function normalizeGitError(error: unknown): { code: GitFailureCode; message: string } {
+  if (error instanceof GitExecutionError) return { code: error.code, message: error.message };
+  return { code: "io_error", message: error instanceof Error ? error.message : "Unknown Git operation error." };
+}
+
+function isPolicyFailure(code: GitFailureCode): boolean {
+  return code === "policy_denied" || code === "path_outside_workspace" || code === "secret_path" || code === "commit_disabled" || code === "remote_disabled";
+}
+
+function errorCodeForPolicy(kind: GitOperationRequest["kind"], reason: string): GitFailureCode {
+  if (reason.includes("inside an allowed workspace")) return "path_outside_workspace";
+  if (reason.includes("denied")) return "secret_path";
+  if (kind === "local_commit") return "commit_disabled";
+  return "policy_denied";
+}
+
+function formatMarkdown(title: string, sections: readonly RuntimeArtifactSection[]): string {
+  return [`# ${title}`, "", ...sections.flatMap((section) => [`## ${section.heading}`, "", section.body, "", ...section.evidence.map((item) => `- ${item}`), ""])].join("\n").trim();
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}

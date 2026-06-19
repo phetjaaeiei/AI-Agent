@@ -1,0 +1,6 @@
+{"id":"clear_scope","command":"Build a sales dashboard with repository evidence, filters, CSV export, tests, and measurable acceptance criteria.","expectedStatus":"completed","expectedDecision":"pass","minimumScore":80}
+{"id":"ambiguity_visible","command":"Build a reporting feature and record open repository and environment questions.","expectedStatus":"completed","expectedDecision":"pass","minimumScore":80}
+{"id":"security_risk_owned","command":"Plan a customer portal that handles personal data and requires security review evidence.","expectedStatus":"completed","expectedDecision":"pass","minimumScore":80}
+{"id":"bounded_revision","command":"Build a dashboard with evidence [revise]","expectedStatus":"completed","expectedDecision":"pass","minimumScore":80,"expectedAttempt":2}
+{"id":"missing_evidence_block","command":"Create an unverifiable mission [block]","expectedStatus":"blocked","expectedDecision":"block","maximumScore":79}
+{"id":"malformed_output","command":"Create a malformed planner result [invalid-output]","expectedStatus":"failed","expectedErrorCode":"invalid_output"}

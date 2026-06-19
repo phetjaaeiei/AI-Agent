@@ -1,0 +1,336 @@
+# Implementation Progress
+
+## 2026-06-18
+
+### Completed
+
+- Added TypeScript workspace scaffold.
+- Added shared contracts for roles, skills, accuracy, artifacts, audit events, and workflow.
+- Added full role registry with 43 roles across executive, product, design, engineering, QA, DevOps, and operations.
+- Added role skill matrix with role boundaries, review strengths, and approval rights.
+- Added phase RACI for 12 operational mission phases.
+- Added 6 quality gates with score thresholds, verifier roles, required artifacts, and pass criteria.
+- Added weighted accuracy scoring helpers.
+- Added assumption log helpers and ambiguity actions.
+- Added 10 mission benchmark fixtures covering normal, ambiguous, security-sensitive, deployment-only, and missing-integration paths.
+- Added foundation verification script.
+- Added agent/model routing contracts and suitability validation for all 43 roles.
+- Added routing documentation in `docs/ROLE_AGENT_MODEL_ROUTING.md`.
+- Added React + Vite frontend app scaffold under `apps/web`.
+- Built first HQ + Mission Control mock UI using the actual contracts as data sources.
+- Added generated pixel office background asset at `apps/web/public/assets/pixel-office-hq.png`.
+- Saved design concept reference at `docs/concepts/hq-mission-control-concept.png`.
+- Added Playwright as a dev dependency for rendered UI QA when Browser `iab` is unavailable.
+- Added stateful Mission Control interactions:
+  - selected role and room switching from the pixel office map;
+  - phase timeline gate selection driven by `QualityGateId`;
+  - artifact evidence preview drawer with open and close behavior;
+  - activity feed filters for gates, artifacts, tools, and risks;
+  - mock autopilot runtime step that updates gate status, score, selected role, room, and activity feed.
+- Adjusted sprite animation and QA room placement after rendered QA found unstable click targets and a room center overlap.
+- Rebuilt the HQ surface from a static background image into a DOM/CSS tactical map:
+  - 240 real map tiles;
+  - room buttons for all departments;
+  - corridor and door layers;
+  - room furniture/fixtures for each department;
+  - animated agent runners that patrol within stable click targets;
+  - reduced-motion fallback for map movement.
+- Fixed mobile navigation so it no longer floats over or obscures the map while scrolling.
+- Added workflow route visualization:
+  - 6 route paths across BA, Tech Lead, Frontend, QA, DevOps, Technical Writer, and CEO handoffs;
+  - one active route pulse at a time;
+  - animated workflow runner tied to the active route;
+  - Active Handoff inspector card showing sender, receiver, and task summary;
+  - `Run autopilot` advances route state, selected role, selected artifact, gate, and activity feed.
+- Added frontend mission task graph state:
+  - 6 task records mapped to route, role, room, artifact, phase, gate, priority, and ETA;
+  - `Run autopilot` now marks the current task passed and activates the next task;
+  - inspector Task Graph card supports selecting a task to inspect its route, gate, owner, room, and artifact;
+  - rooms show active/queued/blocked workload badges when they own mission tasks;
+  - agents show task badges derived from active, queued, or blocked work;
+  - desktop layout now clamps the Mission Control grid height so the map no longer stretches when inspector content grows.
+- Polished the tactical map for pixel-game readability:
+  - removed static floating work-token labels from the map;
+  - reduced route rendering to the active route only, with start/end nodes and a compact artifact token;
+  - replaced verbose room workload text with small `A/Q/B` pixel chips;
+  - added 21 room decor pixels across executive, product, design, engineering, QA, DevOps, and operations rooms;
+  - upgraded agent sprites with face/body/feet pixel layers and hover/selected-only role labels;
+  - fixed inspector grid overflow so role/gate/task cards stay inside the right panel;
+  - hid room status text, route card/nodes, and sprite labels on mobile to reduce visual crowding.
+- Added a deterministic mission runtime foundation:
+  - `packages/workflow/src/runtime/mission-runtime.ts` now owns command parsing, mission workload calculation, and autopilot state transition helpers;
+  - mission command parser detects capabilities, recommended roles, risks, missing setup inputs, autonomy mode, and confidence;
+  - runtime transition moves the active task to passed, activates the next task, updates gate state, appends activity, and returns UI selection targets;
+  - frontend workload badges now call shared runtime helpers instead of duplicating role/room calculation logic;
+  - bottom mission command is now an editable textarea rather than static text;
+  - inspector includes a Command Plan card showing parsed autonomy mode, confidence, detected capabilities, and missing setup inputs;
+  - `Run autopilot` now uses `advanceMissionRuntime` from the workflow package.
+- Added local mission persistence and runtime memory:
+  - runtime now defines versioned `RuntimeSessionSnapshot` records;
+  - runtime now has artifact record and audit event helpers for persisted mission memory;
+  - frontend restores mission command, runtime state, selection, activity, artifact records, and audit events from `localStorage`;
+  - frontend autosaves mission snapshots whenever command, route, gate, task, selection, artifact, or audit state changes;
+  - `Run autopilot` now records an artifact memory entry and audit event for each task advance;
+  - command dock shows saved time, artifact count, and audit event count as compact chips.
+- Added backend orchestrator service boundary:
+  - added `apps/orchestrator/src/server.ts` with Node HTTP endpoints;
+  - added file-backed mission storage in `apps/orchestrator/src/mission-store.ts`;
+  - added `advanceStoredMission` orchestration helper in `apps/orchestrator/src/orchestrator.ts`;
+  - added backend runtime fixtures in `apps/orchestrator/src/fixtures.ts`;
+  - added `GET /health`;
+  - added `GET /api/mission/session`;
+  - added `PUT /api/mission/session`;
+  - added `POST /api/mission/autopilot`;
+  - added `POST /api/mission/reset`;
+  - added `npm run dev:orchestrator`;
+  - added `npm run verify:orchestrator`;
+  - added `@types/node` for type-safe Node built-in HTTP/file APIs.
+- Connected the frontend command/autopilot path to the orchestrator service:
+  - added `apps/web/src/orchestrator-client.ts` for session fetch, session sync, and autopilot advance calls;
+  - frontend now hydrates mission session from `GET /api/mission/session` when the service is available;
+  - `Run autopilot` now syncs the current browser snapshot with `PUT /api/mission/session` before calling `POST /api/mission/autopilot`;
+  - frontend applies server-returned `RuntimeSessionSnapshot` records back into selected role, room, gate, route, task, activity, artifact, and audit state;
+  - command dock now shows `Server connected`, `Syncing server`, or `Local fallback` as a compact status chip;
+  - local `advanceMissionRuntime` remains the fallback when the orchestrator is unreachable.
+- Added richer artifact content storage:
+  - added `RuntimeArtifactContent` and structured Markdown artifact generation in `packages/workflow/src/runtime/mission-runtime.ts`;
+  - added file-backed artifact content persistence in `apps/orchestrator/src/artifact-content-store.ts`;
+  - added seeded orchestrator artifact contents for PRD, Acceptance Matrix, Technical Plan, QA Report, and Deployment Log;
+  - added `GET /api/mission/artifacts`;
+  - added `GET /api/mission/artifacts/:id`;
+  - `POST /api/mission/autopilot` now generates and persists structured artifact content alongside artifact records;
+  - `POST /api/mission/reset` now resets both mission session and artifact content store;
+  - frontend now hydrates artifact contents from the orchestrator;
+  - inspector now shows an Artifact Memory panel with source, version, owner, summary, and structured evidence sections;
+  - local fallback now generates local artifact content with the same shared helper.
+
+### Verification
+
+- `npm run typecheck`: passed.
+- `npm run verify:foundation`: passed.
+  - Roles: 43
+  - Operational phases with RACI: 12
+  - Quality gates: 6
+  - Mission benchmarks: 10
+  - Agent model routing profiles: 43
+  - Runtime parser capabilities from verification fixture: 6
+  - Runtime persisted records from verification fixture: 2
+- `npm run verify:orchestrator`: passed.
+  - health endpoint returned `ok`;
+  - initial session returned schema version 1;
+  - initial session included 5 artifact records and 1 audit event;
+  - artifacts endpoint returned 5 seeded Markdown artifact contents;
+  - autopilot advanced `task-acceptance-handoff` over `route-acceptance-to-tech`;
+  - autopilot persisted command draft, cursor 1, active route index 1, 6 artifact records, and 2 audit events;
+  - autopilot returned generated artifact content for `art-acceptance`;
+  - artifact detail endpoint fetched generated content by id;
+  - reset restored 5 seeded artifact contents;
+  - `PUT /api/mission/session` accepted valid snapshots and rejected unsupported schema;
+  - `POST /api/mission/reset` restored the default session.
+- `npm run build:web`: passed.
+- Frontend-to-orchestrator rendered QA:
+  - web app: `http://127.0.0.1:5173/`;
+  - orchestrator: `http://127.0.0.1:8787`;
+  - page hydrated from the backend and showed `Server connected`;
+  - page hydrated Artifact Memory from `GET /api/mission/artifacts`;
+  - clicking `Run autopilot` issued `PUT /api/mission/session` then `POST /api/mission/autopilot`;
+  - Artifact Memory updated from `Technical Plan` to `Acceptance matrix handoff`;
+  - Artifact Memory source stayed `Server` on the connected path;
+  - backend advanced from `Dispatch UI build task` to `Send build evidence`;
+  - activity feed showed `Implementation evidence attached`;
+  - local session mirrored cursor 2, route index 2, 7 artifact records, and 3 audit events during the connected-path test;
+  - desktop and mobile horizontal overflow remained false;
+  - mobile Artifact Memory stayed visible at `390x844`;
+  - mobile status chip stayed visible at `390x844`;
+  - a separate unreachable-orchestrator context showed `Local fallback`, advanced the mission locally, and generated `Local` Artifact Memory;
+  - the live orchestrator store was reset back to the default cursor 0 session after QA.
+- Manual orchestrator smoke:
+  - service started at `http://127.0.0.1:8787`;
+  - `GET /health`: returned `{"status":"ok","service":"team-ai-agent-orchestrator"}`;
+  - `GET /api/mission/session`: returned cursor 0, 5 artifacts, 1 audit event;
+  - `GET /api/mission/artifacts`: returned 5 Markdown artifact contents;
+  - `POST /api/mission/autopilot`: returned cursor 1, route index 1, 6 artifacts, 2 audit events, and generated artifact content.
+- Rendered QA via Playwright fallback:
+  - URL: `http://127.0.0.1:5173/`
+  - Desktop viewport: `1440x900`
+  - Mobile viewport: `390x844`
+  - Console/page errors: none
+  - Horizontal overflow: none
+  - Map implementation checks:
+    - `.office-scene` no longer uses an image background;
+    - `.map-tile` count: 240;
+    - `.office-room` count: 7;
+    - `.room-fixture` count: 15;
+    - Frontend Developer sprite runner moved during observation;
+    - mobile navigation position is static and does not overlap the map.
+    - workflow route visual paths: 2 for the active route shadow and active route;
+    - active workflow route lines: 1;
+    - route pins: 0;
+    - static floating work tokens: 0;
+    - route token width: 32px;
+    - room decor pixels: 21;
+    - inspector overflow rows: 0;
+    - workflow runner moved during observation;
+    - mobile hides route card, route nodes, room status text, and sprite labels to avoid covering the map.
+    - task rows: 6;
+    - selected task rows: 1;
+    - active room workload badges: 5;
+    - agent task badges: 6 desktop, 5 mobile after state transition;
+    - desktop main grid height clamped around 680px at 1440x900.
+    - command textarea is editable;
+    - Command Plan card updates after entering a new mission prompt;
+    - parsed sample command reached 90% confidence and autopilot mode;
+    - mobile command dock remains within the 390px viewport.
+    - mission snapshot survives page reload after `Run autopilot`;
+    - restored command, active route, active task, top activity event, route index, and autopilot cursor match pre-reload state;
+    - saved session included 6 artifact records and 2 audit events after one autopilot step;
+    - command memory chips do not overflow on desktop or mobile.
+  - Core interactions verified:
+    - selected Frontend Developer agent updates inspector;
+    - selected QA Lab room updates inspector to Automation QA;
+    - QA Report artifact opens and closes;
+    - Risks activity filter shows the production deploy blocker;
+    - `Run autopilot` appends the Technical gate event and changes gate score/status.
+    - selected task changes route, selected gate, selected artifact, and inspector context;
+    - `Run autopilot` advances a selected task from running to passed and preserves a blocked next task.
+    - `Run autopilot` now parses the current command draft before applying the runtime transition.
+    - `Run autopilot` now persists artifact and audit memory entries.
+
+## 2026-06-19
+
+### Completed
+
+- Completed [Milestone C: Real Agent Runs](./NEXT_IMPLEMENTATION_PLAN.md) with a fully local Ollama provider.
+- Added versioned agent-run, event, usage, planner-output, verifier-output, runtime-info, and store contracts.
+- Added provider-neutral executor boundary with deterministic and Ollama implementations.
+- Added Ollama structured outputs for Product Manager planning and independent Lead BA verification.
+- Added a bounded one-revision loop with planning score, pass, revise, block, malformed-output, timeout, cancel, and retry handling.
+- Added atomic file-backed agent-run persistence with idempotency and bounded retention.
+- Added agent-run REST endpoints and Server-Sent Events for start, list, detail, events, cancel, and retry.
+- Added persisted Mission Plan artifacts, audit events, gate updates, and Mission Control selection updates.
+- Added Mission Control runtime status, provider/model details, token counts, verification score, defects, cancel, and retry actions.
+- Added deterministic CI verification, six focused eval cases, and an opt-in Ollama live smoke.
+- Installed Ollama `0.30.10`, started it as a Homebrew service, and installed `qwen3:8b` locally.
+- Updated model routing targets to the local Qwen3 family and documented the local runtime in [OLLAMA_AGENT_RUNTIME.md](./OLLAMA_AGENT_RUNTIME.md).
+- Completed Phase 3 local execution tools.
+- Added shared tool-call contracts for tool kind, status, action class, policy snapshot, policy decision, result evidence, typed failure code, and persisted store snapshots.
+- Added `packages/tool-runner` with a local policy-controlled runner for file reads, file writes, allowlisted shell commands, and test commands.
+- Added local workspace safety rules:
+  - workspace-root confinement;
+  - denied secret/generated paths including `.env`, `.git`, `.data`, `node_modules`, `dist`, and private-key patterns;
+  - shell metacharacter blocking;
+  - `spawn` with `shell: false`;
+  - reduced command environment;
+  - timeout and output-size limits.
+- Added file-backed tool-call persistence and `ToolCallService`.
+- Added tool-runner endpoints:
+  - `GET /api/mission/tool-policy`;
+  - `GET /api/mission/tool-calls`;
+  - `POST /api/mission/tool-calls`;
+  - `GET /api/mission/tool-calls/:toolCallId`.
+- Tool calls now write audit/activity evidence into the mission session.
+- File writes now generate `Local Code Patch` artifacts from `tool_runner` source.
+- Test commands now generate test-run evidence artifacts, preserving both passing and failing command output.
+- `POST /api/mission/reset` now clears tool-call history.
+- Added Mission Control UI for local tool policy, latest tool calls, implementation-plan inspection, and typecheck evidence.
+- Added [LOCAL_TOOL_RUNNER.md](./LOCAL_TOOL_RUNNER.md).
+- Completed Phase 4 local Git integration.
+- Added shared Git operation contracts for policy snapshots, policy decisions, worktree state, diff summaries, commit plans, PR drafts, typed failure codes, operation records, and persisted store snapshots.
+- Added `packages/git-runner` with a policy-controlled local Git runner for status, diff, commit-plan, optional local-commit, and offline PR-draft operations.
+- Added Git safety rules:
+  - Git operations are separate from generic shell commands;
+  - local commits are disabled by default;
+  - remote push and remote PR creation are disabled by default;
+  - denied paths include `.env`, generated folders, private-key patterns, and local SSH key names;
+  - commands run through `spawn` with `shell: false`;
+  - environment is reduced to `PATH`, `HOME`, `GIT_TERMINAL_PROMPT=0`, and `GIT_PAGER=cat`;
+  - diff output is bounded and denied-path content is not exposed.
+- Added file-backed Git operation persistence and `GitOperationService`.
+- Added Git endpoints:
+  - `GET /api/mission/git-policy`;
+  - `GET /api/mission/git-operations`;
+  - `POST /api/mission/git-operations`;
+  - `GET /api/mission/git-operations/:operationId`.
+- Git operations now write audit/activity evidence into the mission session.
+- Git diff, commit-plan, PR-draft, and local-commit results now generate artifact memory entries from `git_runner` source.
+- `POST /api/mission/reset` now clears Git operation history.
+- Added Mission Control UI for local Git policy, status checks, commit-plan generation, PR draft generation, and latest Git operation evidence.
+- Added [GIT_INTEGRATION.md](./GIT_INTEGRATION.md).
+- Updated [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md) to Phase 5 Review Loop And CI Evidence.
+- Completed Phase 5 Review Loop And CI Evidence.
+- Added shared review packet, completeness requirement, reviewer decision, local CI run, delivery reference, and persisted store contracts.
+- Added a file-backed review packet store and deterministic assessment service.
+- Added completeness gates for changed files, passing tests, Git status, Git diff, commit-plan readiness, and required reviewer approvals.
+- Added role-aware pass/revise/block decisions for Tech Lead, QA Lead, and Lead BA.
+- Added a seven-command local CI profile that executes only through the existing tool-runner allowlist.
+- Added offline Markdown delivery reports with summary, file evidence, verification, risks, rollback notes, and open handoff items.
+- Added review packet REST endpoints for create, list, detail, refresh, local CI, reviewer decisions, and delivery generation.
+- Added Mission Control Review Packet UI with readable evidence checklist, reviewer controls, CI matrix, and delivery report action.
+- Added [REVIEW_LOOP_AND_CI.md](./REVIEW_LOOP_AND_CI.md).
+- Completed Phase 6 Autonomous Mission Completion.
+- Added shared mission-controller stage, status, attempt, stop-reason, reviewer-result, request, record, and persisted-store contracts.
+- Added a file-backed mission controller store with idempotency and bounded retention.
+- Added a resumable mission state machine across planning, local tool evidence, Git evidence, review packet, local CI, reviewers, and delivery.
+- Added start, list, detail, resume, cancel, and bounded retry controller endpoints.
+- Added startup recovery for interrupted queued/running controllers and cancellation-before-reset behavior.
+- Added independent Tech Lead, QA Lead, and Lead BA review executors with Ollama structured output and deterministic fallback.
+- Reviewer executors cannot pass missing or blocked non-reviewer evidence and allow only one bounded revision loop.
+- `Run local agents` now starts the whole controller instead of only a planning agent run.
+- Added Mission Control controller status, seven-stage trace, attempt count, reviewer results, stop reason, cancel, and retry controls.
+- Added a project [README.md](../README.md) and [.gitignore](../.gitignore) suitable for GitHub initialization without generated folders or secret files.
+- Added [AUTONOMOUS_MISSION_CONTROLLER.md](./AUTONOMOUS_MISSION_CONTROLLER.md).
+
+### Verification
+
+- `npm run typecheck`: passed.
+- `npm run verify:foundation`: passed with 43 roles, 12 operational phases, 6 quality gates, 10 benchmarks, and 43 routing profiles.
+- `npm run verify:agent-runtime`: passed with deterministic pass, revise, block, malformed output, timeout, cancellation, idempotency, and restart recovery.
+- `npm run verify:tool-runner`: passed with local file read/write, secret path blocking, outside-workspace blocking, patch artifact generation, passing/failing test evidence, command blocking, persistence, and reset coverage.
+- `npm run verify:git-runner`: passed with Git policy defaults, status, dirty/untracked files, denied path handling, diff redaction, commit-plan blocking, offline PR-draft state, default local-commit blocking, policy-enabled local commit in a temp repository, and store reset coverage.
+- `npm run verify:orchestrator`: passed with agent runtime health, REST lifecycle, persisted completion, SSE history, and reset coverage.
+- `npm run verify:orchestrator`: now also covers tool policy, file read/write tool-call endpoints, patch artifact creation, blocked secret paths, tool-call detail/list endpoints, and reset clearing tool calls.
+- `npm run verify:orchestrator`: now also covers Git policy, Git status/diff/commit-plan/PR-draft/local-commit endpoints, Git artifacts, Git detail/list endpoints, and reset clearing Git operations.
+- `npm run verify:review-packet`: passed with deterministic draft, CI pass, required approvals, ready, delivery, failed-test block, Markdown artifact, allowlist, and reset coverage.
+- `npm run verify:orchestrator`: now also covers review packet create/list/detail/refresh/reviewer/delivery endpoints, denied-path blocking, draft delivery safety, and reset clearing review packets.
+- `npm run verify:mission-controller`: passed complete, policy block, retry limit, CI failure, reviewer revision, cancellation, restart recovery, idempotency, delivery, and reset paths.
+- `npm run verify:orchestrator`: now also covers controller start/list/detail/cancel endpoints and reset clearing controller history.
+- `npm run build:web`: passed without browser-externalized Node module warnings.
+- `npm run eval:agent-runtime`: 6 passed, 0 failed.
+- `npm run verify:ollama`: passed with `qwen3:8b`, structured planner/verifier output, persisted traces, and an agent-runtime artifact.
+- Live rendered Ollama run used 2 attempts and 5,275 local tokens, then correctly entered `blocked` at 81/100 because the verifier still requested revision after the configured limit.
+- Playwright fallback rendered QA passed at `1440x900` and `390x844`: no console errors, no horizontal overflow, persisted run state survived reload, and blocked/retry created a new audited run.
+- Phase 3 rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser plugin tools were not available in the turn, so Playwright fallback was used;
+  - Local Tool Runner card rendered with workspace policy state;
+  - `Inspect plan` created completed file-read evidence for `docs/NEXT_IMPLEMENTATION_PLAN.md`;
+  - `Run typecheck` created completed test evidence from `npm run typecheck`;
+  - Artifact Memory showed `Test Run Evidence` with source `Tool`;
+  - console errors: none;
+  - horizontal overflow: none;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-tools-desktop.png` and `/tmp/team-ai-agent-tools-mobile.png`.
+- Phase 4 Git Integration rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser plugin tools were not available in the turn, so Playwright fallback was used;
+  - Git Integration card rendered with local policy state;
+  - `Check status` created a controlled failed Git operation in the current non-Git workspace;
+  - deterministic success and local-commit paths remain covered by temp-repository verification;
+  - desktop page title was `Team AI Agent`;
+  - desktop meaningful content rendered with no framework overlay;
+  - mobile meaningful content rendered with no framework overlay;
+  - console/page errors: none;
+  - horizontal overflow: none after constraining the mobile nav and phase timeline;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-git-desktop.png` and `/tmp/team-ai-agent-git-mobile.png`.
+- Phase 6 Autonomous Mission Controller rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - the Browser plugin was listed, but its local browser-client import was rejected by the runtime;
+  - one `Run local agents` click completed planning and tool evidence automatically;
+  - the controller stopped at Git evidence because the workspace is not yet a Git repository;
+  - the seven-stage trace showed planning/tool complete, Git blocked, and later stages waiting;
+  - retry control and readable stop reason were visible;
+  - console/page errors: none;
+  - horizontal overflow: none;
+  - screenshots saved at `/tmp/team-ai-agent-controller-desktop.png` and `/tmp/team-ai-agent-controller-mobile.png`.
+- In-app Browser was unavailable in the session, so rendered checks used the repo's Playwright dependency.
+
+### Next
+
+- Start Phase 7 GitHub Repository Integration after GitHub CLI is installed/authenticated and the initial repository scope is confirmed.
+- Keep remote push, remote PR creation, merge, deployment, production actions, and destructive Git reset/checkout disabled until explicit integration policy is added.
