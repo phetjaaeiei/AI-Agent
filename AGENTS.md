@@ -66,3 +66,10 @@ Phase 5 Review Loop And CI Evidence is complete. Review packets, completeness ga
 Phase 6 Autonomous Mission Completion is complete. The resumable local controller invokes existing agent, tool, Git, review, CI, reviewer, and delivery boundaries with bounded retries and visible stop reasons.
 
 Phase 7 should connect the local repository to GitHub with explicit remote-read, push, draft-PR, and branch policy. Keep automatic merge, deployment, production actions, and destructive Git operations disabled.
+
+GitHub baseline:
+
+- repository: `phetjaaeiei/AI-Agent`;
+- local branch: `main` tracking `origin/main`;
+- initial full-project commit: `5baa152`;
+- future implementation changes from `main` should use `codex/*` branches and draft pull requests unless the user explicitly requests a direct update.

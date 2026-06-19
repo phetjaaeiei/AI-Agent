@@ -1,25 +1,26 @@
 # Next Implementation Plan: Phase 7 GitHub Repository Integration
 
-Status: Waiting for local GitHub CLI setup after Phase 6 completion on 2026-06-19
+Status: In progress after repository bootstrap on 2026-06-19
 
 ## 1. Current Position
 
 The local autonomous mission controller is complete. It can advance planning, tool evidence, Git evidence, review packets, local CI, independent reviewers, and delivery reports with persisted recovery and bounded retries.
 
-The user created `https://github.com/phetjaaeiei/AI-Agent`. The GitHub connector confirms it exists, uses `main`, is currently empty, and the connected account has admin/push permission. This workspace is not yet a Git repository and `gh` is not installed. No remote push has been performed.
+The project is now published at `https://github.com/phetjaaeiei/AI-Agent`. The local `main` branch tracks `origin/main`, GitHub CLI is authenticated as `phetjaaeiei`, and the complete project baseline was pushed successfully.
 
-## 2. Prerequisites
+## 2. Completed Prerequisites
 
-1. Install GitHub CLI: `brew install gh`
-2. Authenticate: `gh auth login`
-3. Verify: `gh auth status`
-4. Confirm that the complete current workspace belongs in the first repository commit.
+1. GitHub CLI installed and authenticated.
+2. Repository access verified with admin/push permission.
+3. Complete first-commit scope confirmed by the user.
+4. Local repository initialized on `main` with `origin` configured.
+5. Initial project baseline pushed with upstream tracking.
 
 The project now has `.gitignore` rules for dependencies, build output, runtime state, environment files, logs, and private-key formats.
 
 ## 3. Milestone Decision
 
-Start **Phase 7: GitHub Repository Integration** after prerequisites pass.
+Continue **Phase 7: GitHub Repository Integration** with explicit runtime policy for future remote mutations.
 
 ```txt
 local reviewed delivery
@@ -34,10 +35,10 @@ local reviewed delivery
 
 ### Slice G1: Repository Bootstrap And Remote Read
 
-- initialize the local repository with intentional first-commit scope;
-- connect `origin` to `phetjaaeiei/AI-Agent`;
-- verify default branch, repository access, and remote metadata;
-- expose remote-read health without storing credentials.
+- completed: initialized the local repository with intentional first-commit scope;
+- completed: connected `origin` to `phetjaaeiei/AI-Agent`;
+- completed: verified default branch, repository access, and remote metadata;
+- remaining: expose remote-read health in Mission Control without storing credentials.
 
 ### Slice G2: Remote Mutation Policy
 
