@@ -1,90 +1,95 @@
-# Next Implementation Plan: Phase 7 GitHub Repository Integration
+# Next Implementation Plan: Phase 8 Real Mission Execution
 
-Status: Phase 7 G4 completed, ready for branch publication on 2026-06-19
+Status: Phase 8 opened after Phase 7 draft PR publication on 2026-06-22
 
 ## 1. Current Position
 
-The local autonomous mission controller is complete. It can advance planning, tool evidence, Git evidence, review packets, local CI, independent reviewers, and delivery reports with persisted recovery and bounded retries.
+Phase 7 GitHub Repository Integration is complete through draft PR publication.
 
-The project is now published at `https://github.com/phetjaaeiei/AI-Agent`. The local `main` branch tracks `origin/main`, GitHub CLI is authenticated as `phetjaaeiei`, and the complete project baseline was pushed successfully.
+- Repository: `phetjaaeiei/AI-Agent`
+- Branch: `codex/phase-7-remote-mutation-policy`
+- Draft PR: `https://github.com/phetjaaeiei/AI-Agent/pull/1`
+- PR state: open draft
+- Merge state: clean
 
-## 2. Completed Prerequisites
+The app can now run local-first agent planning, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication, draft PR creation, and read-only remote publication evidence.
 
-1. GitHub CLI installed and authenticated.
-2. Repository access verified with admin/push permission.
-3. Complete first-commit scope confirmed by the user.
-4. Local repository initialized on `main` with `origin` configured.
-5. Initial project baseline pushed with upstream tracking.
+## 2. Phase 8 Goal
 
-The project now has `.gitignore` rules for dependencies, build output, runtime state, environment files, logs, and private-key formats.
-
-## 3. Milestone Decision
-
-Continue **Phase 7: GitHub Repository Integration** with explicit runtime policy for future remote mutations.
+Turn the current Mission Control prototype into a practical end-to-end local mission workspace where a user can enter a real mission, watch the controller advance it, inspect real evidence, and recover previous mission runs without relying on static demo state.
 
 ```txt
-local reviewed delivery
-  -> branch policy
-  -> explicit push permission
-  -> GitHub draft PR
-  -> remote check evidence
-  -> human merge decision
+user mission
+  -> persisted mission session
+  -> controller run
+  -> real tool/git/review/CI evidence
+  -> delivery packet
+  -> optional draft PR handoff
 ```
+
+## 3. Operating Rules
+
+- Use local Ollama by default for live agent execution.
+- Keep deterministic fallback visible and testable.
+- Keep arbitrary shell, secret reads, deploy, production actions, force push, branch deletion, destructive Git reset/checkout, automatic merge, and automatic public release out of scope.
+- Keep GitHub behavior draft-PR and remote-evidence oriented until a human explicitly decides merge/release policy.
+- Preserve all durable project memory in the AI-Agent Obsidian vault after substantive work.
 
 ## 4. Delivery Slices
 
-### Slice G1: Repository Bootstrap And Remote Read
+### Slice H1: Mission Intake And Session Source Of Truth
 
-- completed: initialized the local repository with intentional first-commit scope;
-- completed: connected `origin` to `phetjaaeiei/AI-Agent`;
-- completed: verified default branch, repository access, and remote metadata;
-- completed: exposed read-only remote health in Mission Control without storing credentials.
+- replace remaining static/demo mission defaults with an explicit mission intake flow;
+- persist mission title, command, assumptions, risks, selected autonomy mode, and created timestamp through the orchestrator;
+- keep local recovery if the orchestrator is unavailable;
+- show clear empty, draft, saved, running, blocked, and delivered mission states.
 
-### Slice G2: Remote Mutation Policy
+### Slice H2: Mission History And Run Recovery
 
-- completed: separate permissions for branch push and draft PR creation are reflected in policy preflight;
-- completed: policy preflight requires an explicit delivered review packet before a future remote mutation can pass;
-- completed: policy preflight records actor, branch, commit SHA, remote target, permission state, delivery evidence, blockers, and policy decision;
-- completed: force push and branch deletion remain disabled.
+- add a mission/run list backed by persisted orchestrator state;
+- let users reopen a mission controller run, review packet, tool evidence, Git operation, and delivery packet;
+- distinguish current run, previous runs, cancelled runs, blocked runs, and delivered runs;
+- avoid replaying remote mutation or local commits during recovery.
 
-### Slice G3: Draft Pull Request Connector
+### Slice H3: Real Evidence Inspector
 
-- completed: added guarded `branch_push` execution that can push a `codex/*` branch with upstream tracking only after policy and reviewed delivery pass;
-- completed: added guarded `draft_pr_create` execution through `gh pr create --draft` after verifying the remote branch matches local HEAD;
-- completed: draft PR bodies are hydrated from the reviewed delivery Markdown, including local CI, reviewer decisions, risks, rollback notes, and remote safety notes;
-- completed: deterministic fixtures cover enabled branch push and fake draft PR creation without contacting GitHub;
-- completed: default policy still blocks branch push and draft PR creation.
+- make Artifact Memory and inspector panels prioritize real orchestrator artifacts over seeded demo artifacts;
+- add better filters for tool, Git, review, agent, and delivery evidence;
+- expose command output summaries without leaking denied paths or secrets;
+- keep artifact Markdown readable on desktop and mobile.
 
-### Slice G4: Mission Control Remote Evidence
+### Slice H4: End-To-End Mission QA
 
-- completed: added read-only `remote_evidence` operation for repository, branch, local commit, remote branch commit, PR state, check summary, blocked actions, and retry reason;
-- completed: distinguished `local_only`, `published_current`, `published_stale`, and `unknown` remote publication states;
-- completed: Mission Control shows remote publication evidence, PR status, checks, retryable state, and still-blocked merge/deploy/force-push/branch-deletion actions;
-- completed: network/auth/PR-status failures return retryable evidence without repeating commits or remote mutation;
-- completed: deterministic local and fake-GitHub fixture coverage.
+- add deterministic verification for a user-entered mission moving through controller, tool evidence, Git evidence, review, CI, reviewers, and delivery;
+- add rendered QA for new mission intake, blocked mission, recovered mission, and delivered mission states;
+- keep Browser-first QA when available and Playwright fallback when `iab` is unavailable.
 
-### Slice G5: Branch Publication And Draft PR
+### Slice H5: Phase 8 Hardening
 
-- current next slice;
-- commit the completed Phase 7 changes on the existing `codex/*` branch;
-- push the branch to `origin`;
-- create a draft PR for human review;
-- do not merge, deploy, force push, delete branches, or run production actions.
+- improve errors for Ollama unavailable, GitHub auth unavailable, CI failure, denied path changes, and stale remote branch state;
+- add explicit retry guidance that does not repeat commits, pushes, or PR creation;
+- document remaining human handoff steps.
 
-## 5. Not In This Milestone
+## 5. Not In This Phase
 
 - automatic merge;
+- deployment or production release;
 - force push;
 - branch deletion;
-- production deploys;
-- cloud model requirements;
+- destructive Git reset/checkout;
+- cloud model requirement;
 - secret serialization;
-- destructive Git reset/checkout.
+- unbounded autonomous loops.
 
 ## 6. Required Verification
 
-- all existing local verification commands;
-- deterministic remote-policy tests;
-- GitHub authentication and repository access checks;
-- dry-run/fixture coverage for push and draft PR idempotency;
-- rendered QA for local-only, auth-missing, push-failed, and PR-created states.
+- `npm run typecheck`;
+- `npm run verify:foundation`;
+- `npm run verify:agent-runtime`;
+- `npm run verify:tool-runner`;
+- `npm run verify:git-runner`;
+- `npm run verify:review-packet`;
+- `npm run verify:mission-controller`;
+- `npm run verify:orchestrator`;
+- `npm run build:web`;
+- rendered QA for desktop and mobile mission intake/recovery/delivery flows.
