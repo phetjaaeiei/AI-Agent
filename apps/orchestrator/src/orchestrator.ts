@@ -72,6 +72,8 @@ export async function advanceStoredMission(
   const snapshot = createRuntimeSessionSnapshot({
     missionId: current.missionId,
     commandDraft,
+    assumptionDraft: current.assumptionDraft,
+    missionAssumptions: current.missionAssumptions,
     missionPlan,
     missionState: createRuntimeMissionState({
       commandDraft,

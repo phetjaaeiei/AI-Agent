@@ -403,6 +403,21 @@
   - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
   - rendered QA at `1440x900` and `390x844` confirmed initial Saved state, edit -> Draft, Save mission -> Saved, Save/Reset disabled after save, reload persistence, Reset draft restoring the last saved command, no console errors, no failed requests, and no horizontal overflow;
   - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-intake-save-desktop.png` and `/tmp/team-ai-agent-h1-intake-save-mobile.png`.
+- Completed the first-class assumptions portion of Phase 8 H1:
+  - runtime snapshots now persist `assumptionDraft` and typed `missionAssumptions`;
+  - snapshot restore remains backward-compatible with sessions created before assumption fields existed;
+  - line-based assumption drafts are trimmed, deduplicated, bounded to 12 records, and preserve existing record metadata when text is unchanged;
+  - Mission Intake edits command and assumptions together, marks local edits as Draft, and saves both through the orchestrator or browser fallback;
+  - Reset draft restores assumptions from the last saved records;
+  - Mission Inspector now renders the saved assumption log and a clear empty state instead of the static benchmark assumption;
+  - orchestrator autopilot and every service path that spreads the current session preserve the assumption source of truth.
+- Phase 8 H1 assumptions verification:
+  - `npm run typecheck`, `verify:foundation`, `verify:orchestrator`, `verify:agent-runtime`, `verify:tool-runner`, `verify:git-runner`, `verify:review-packet`, `verify:mission-controller`, `build:web`, and `git diff --check` passed;
+  - foundation verification covers assumption draft formatting, typed record persistence, and legacy snapshot restore;
+  - orchestrator verification covers default assumptions, autopilot preservation, PUT persistence, and reset restoration;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed Saved -> Draft after assumption edits, two-record save, disabled Save/Reset after save, inspector updates, reload persistence, Reset draft restoration, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-assumptions-desktop.png` and `/tmp/team-ai-agent-h1-assumptions-mobile.png`.
 - Phase 7 draft pull request connector rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
   - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
   - the Playwright packaged browser binary was missing, so installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
@@ -468,5 +483,5 @@
 
 ### Next
 
-- Continue Phase 8 with H1 Mission Intake And Session Source Of Truth.
+- Continue Phase 8 with H2 Mission History And Run Recovery.
 - Keep merge, deployment, production actions, force push, branch deletion, and destructive Git reset/checkout disabled.

@@ -18,10 +18,12 @@ import {
   calculateAccuracyScore,
   calculateMissionAgentWorkloads,
   calculateMissionRoomWorkloads,
+  createAssumptionsFromDraft,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
   createRuntimeSessionSnapshot,
   createTaskRunMap,
+  formatAssumptionDraft,
   getRaciForPhase,
   parseMissionCommand,
   passesQualityGate,
@@ -337,9 +339,16 @@ const auditEvent = createRuntimeAuditEvent({
   entityId: "task-a",
   createdAt: "2026-06-18T10:11:00.000Z"
 });
+const missionAssumptions = createAssumptionsFromDraft({
+  missionId: "mission-runtime-test",
+  draft: "Repository main branch is the implementation baseline.\nStaging credentials are configured outside the session.",
+  createdAt: "2026-06-18T10:11:30.000Z"
+});
 const runtimeSnapshot = createRuntimeSessionSnapshot({
   missionId: "mission-runtime-test",
   commandDraft: parsedCommand.rawCommand,
+  assumptionDraft: formatAssumptionDraft(missionAssumptions),
+  missionAssumptions,
   missionPlan: parsedCommand,
   runtime: {
     gateRuns: advancedRuntime.gateRuns,
@@ -359,10 +368,18 @@ const runtimeSnapshot = createRuntimeSessionSnapshot({
   savedAt: "2026-06-18T10:12:00.000Z"
 });
 const restoredSnapshot = restoreRuntimeSessionSnapshot(JSON.parse(JSON.stringify(runtimeSnapshot)), runtimeSnapshot);
+const legacySnapshot = JSON.parse(JSON.stringify(runtimeSnapshot));
+delete legacySnapshot.assumptionDraft;
+delete legacySnapshot.missionAssumptions;
+const restoredLegacySnapshot = restoreRuntimeSessionSnapshot(legacySnapshot, runtimeSnapshot);
 const rejectedSnapshot = restoreRuntimeSessionSnapshot({ schemaVersion: 999 }, runtimeSnapshot);
 assert(restoredSnapshot.ok, "Runtime session snapshot should restore when schema is valid.");
 assert(restoredSnapshot.snapshot.auditEvents.length === 1, "Runtime session snapshot should preserve audit events.");
 assert(restoredSnapshot.snapshot.artifactRecords.length === 1, "Runtime session snapshot should preserve artifact records.");
+assert(restoredSnapshot.snapshot.missionAssumptions.length === 2, "Runtime session snapshot should preserve mission assumptions.");
+assert(restoredSnapshot.snapshot.assumptionDraft.includes("Staging credentials"), "Runtime session snapshot should preserve assumption draft text.");
+assert(restoredLegacySnapshot.ok, "Runtime session snapshot should restore legacy snapshots without assumptions.");
+assert(restoredLegacySnapshot.snapshot.missionAssumptions.length === 0, "Legacy runtime snapshots should recover with an empty assumption log.");
 assert(!rejectedSnapshot.ok, "Runtime session snapshot should reject unsupported schema.");
 
 if (failures.length > 0) {
@@ -380,4 +397,4 @@ console.log(`Quality gates: ${QUALITY_GATES.length}`);
 console.log(`Mission benchmarks: ${MISSION_BENCHMARKS.length}`);
 console.log(`Agent model routing profiles: ${Object.keys(AGENT_MODEL_ROUTING).length}`);
 console.log(`Runtime parser capabilities: ${parsedCommand.detectedCapabilities.length}`);
-console.log(`Runtime persisted records: ${runtimeSnapshot.artifactRecords.length + runtimeSnapshot.auditEvents.length}`);
+console.log(`Runtime persisted records: ${runtimeSnapshot.artifactRecords.length + runtimeSnapshot.auditEvents.length + runtimeSnapshot.missionAssumptions.length}`);

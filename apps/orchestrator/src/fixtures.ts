@@ -3,6 +3,7 @@ import {
   createRuntimeArtifactContent,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
+  createAssumptionRecord,
   createRuntimeSessionSnapshot,
   parseMissionCommand
 } from "../../../packages/workflow/src/index.js";
@@ -391,6 +392,18 @@ export function createDefaultOrchestratorSession(savedAt = new Date().toISOStrin
   return createRuntimeSessionSnapshot({
     missionId: ORCHESTRATOR_MISSION_ID,
     commandDraft: DEFAULT_MISSION_COMMAND,
+    missionAssumptions: [
+      createAssumptionRecord({
+        missionId: ORCHESTRATOR_MISSION_ID,
+        assumption: "Sales API already exposes daily totals and CSV-safe field names.",
+        source: "Default mission intake",
+        ambiguityClass: "medium",
+        confidence: 72,
+        impact: "Backend developer must verify API shape before frontend export work finishes.",
+        ownerRoleId: "lead_ba",
+        createdAt: savedAt
+      })
+    ],
     missionPlan: parseMissionCommand(DEFAULT_MISSION_COMMAND),
     runtime: {
       gateRuns: initialGateRuns,

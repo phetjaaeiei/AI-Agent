@@ -41,6 +41,7 @@ user mission
 
 - current progress: runtime snapshots now include a durable `missionState` lifecycle (`draft`, `saved`, `running`, `blocked`, `delivered`) shared by the web app and orchestrator services;
 - current progress: Mission Control now has an inline mission intake panel with dynamic title/command parsing, Save mission, Reset draft, server sync, and local fallback;
+- current progress: mission assumptions now persist as first-class `AssumptionRecord` data with a recoverable draft, backward-compatible snapshot restore, server sync, local fallback, and real inspector rendering;
 - replace remaining static/demo mission defaults with real persisted mission/run history;
 - persist mission title, command, assumptions, risks, selected autonomy mode, and created timestamp through the orchestrator;
 - keep local recovery if the orchestrator is unavailable;
@@ -48,6 +49,7 @@ user mission
 
 ### Slice H2: Mission History And Run Recovery
 
+- next implementation target;
 - add a mission/run list backed by persisted orchestrator state;
 - let users reopen a mission controller run, review packet, tool evidence, Git operation, and delivery packet;
 - distinguish current run, previous runs, cancelled runs, blocked runs, and delivered runs;

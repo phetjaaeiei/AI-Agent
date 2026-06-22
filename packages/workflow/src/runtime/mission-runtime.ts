@@ -1,4 +1,10 @@
-import type { DepartmentId, OperationalMissionPhase, QualityGateId, RoleId } from "../../../shared/src/index.js";
+import type {
+  AssumptionRecord,
+  DepartmentId,
+  OperationalMissionPhase,
+  QualityGateId,
+  RoleId
+} from "../../../shared/src/index.js";
 
 export type RuntimeGateStatus = "passed" | "reviewing" | "running" | "queued" | "blocked";
 
@@ -160,6 +166,8 @@ export type RuntimeSessionSnapshot = {
   schemaVersion: 1;
   missionId: string;
   commandDraft: string;
+  assumptionDraft: string;
+  missionAssumptions: readonly AssumptionRecord[];
   missionPlan: ParsedMissionCommand;
   missionState: RuntimeMissionState;
   runtime: RuntimeState;
@@ -593,6 +601,8 @@ export function restoreRuntimeArtifactContents(candidate: unknown): RuntimeArtif
 export function createRuntimeSessionSnapshot(input: {
   missionId: string;
   commandDraft: string;
+  assumptionDraft?: string;
+  missionAssumptions?: readonly AssumptionRecord[];
   missionPlan: ParsedMissionCommand;
   missionState?: RuntimeMissionState;
   runtime: RuntimeState;
@@ -614,6 +624,8 @@ export function createRuntimeSessionSnapshot(input: {
     schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
     missionId: input.missionId,
     commandDraft: input.commandDraft,
+    assumptionDraft: input.assumptionDraft ?? input.missionAssumptions?.map((record) => record.assumption).join("\n") ?? "",
+    missionAssumptions: input.missionAssumptions ?? [],
     missionPlan: input.missionPlan,
     missionState: createRuntimeMissionState({
       commandDraft: input.commandDraft,
@@ -653,9 +665,16 @@ export function restoreRuntimeSessionSnapshot(
 
   const snapshot = candidate as RuntimeSessionSnapshot;
   const missionStateInput = isRuntimeMissionState(snapshot.missionState) ? { missionState: snapshot.missionState } : {};
+  const missionAssumptions = Array.isArray(snapshot.missionAssumptions)
+    ? snapshot.missionAssumptions.filter(isAssumptionRecord)
+    : [];
   const restoredSnapshot = createRuntimeSessionSnapshot({
     missionId: snapshot.missionId,
     commandDraft: snapshot.commandDraft,
+    assumptionDraft: typeof snapshot.assumptionDraft === "string"
+      ? snapshot.assumptionDraft
+      : missionAssumptions.map((record) => record.assumption).join("\n"),
+    missionAssumptions,
     missionPlan: snapshot.missionPlan,
     ...missionStateInput,
     runtime: snapshot.runtime,
@@ -778,6 +797,8 @@ function isRuntimeSessionSnapshot(value: unknown): value is RuntimeSessionSnapsh
     snapshot.schemaVersion === RUNTIME_SESSION_SCHEMA_VERSION &&
     typeof snapshot.missionId === "string" &&
     typeof snapshot.commandDraft === "string" &&
+    (snapshot.assumptionDraft === undefined || typeof snapshot.assumptionDraft === "string") &&
+    (snapshot.missionAssumptions === undefined || Array.isArray(snapshot.missionAssumptions)) &&
     typeof snapshot.savedAt === "string" &&
     Boolean(snapshot.missionPlan) &&
     (snapshot.missionState === undefined || isRuntimeMissionState(snapshot.missionState)) &&
@@ -785,6 +806,38 @@ function isRuntimeSessionSnapshot(value: unknown): value is RuntimeSessionSnapsh
     Boolean(snapshot.selection) &&
     Array.isArray(snapshot.artifactRecords) &&
     Array.isArray(snapshot.auditEvents)
+  );
+}
+
+function isAssumptionRecord(value: unknown): value is AssumptionRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const assumption = value as Partial<AssumptionRecord>;
+
+  return (
+    typeof assumption.id === "string" &&
+    typeof assumption.missionId === "string" &&
+    typeof assumption.assumption === "string" &&
+    typeof assumption.source === "string" &&
+    (
+      assumption.ambiguityClass === "low" ||
+      assumption.ambiguityClass === "medium" ||
+      assumption.ambiguityClass === "high" ||
+      assumption.ambiguityClass === "critical"
+    ) &&
+    typeof assumption.confidence === "number" &&
+    typeof assumption.impact === "string" &&
+    typeof assumption.ownerRoleId === "string" &&
+    (
+      assumption.reviewStatus === "open" ||
+      assumption.reviewStatus === "reviewed" ||
+      assumption.reviewStatus === "accepted" ||
+      assumption.reviewStatus === "rejected" ||
+      assumption.reviewStatus === "expired"
+    ) &&
+    typeof assumption.createdAt === "string"
   );
 }
 

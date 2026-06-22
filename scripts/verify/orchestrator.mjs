@@ -151,6 +151,8 @@ try {
   assert(initialSession.runtime.autopilotCursor === 0, "Initial session should start at autopilot cursor 0.");
   assert(initialSession.artifactRecords.length === 5, "Initial session should include seed artifact records.");
   assert(initialSession.auditEvents.length === 1, "Initial session should include one seed audit event.");
+  assert(initialSession.missionAssumptions.length === 1, "Initial session should include one saved mission assumption.");
+  assert(initialSession.assumptionDraft.includes("Sales API"), "Initial session should expose editable assumption draft text.");
 
   const initialArtifacts = await requestJson(`${baseUrl}/api/mission/artifacts`);
   assert(initialArtifacts.length === 5, "Artifacts endpoint should return seed artifact contents.");
@@ -169,6 +171,7 @@ try {
   assert(advance.snapshot.runtime.activeRouteIndex === 1, "Autopilot should advance active route index.");
   assert(advance.snapshot.artifactRecords.length === 6, "Autopilot should append an artifact record.");
   assert(advance.snapshot.auditEvents.length === 2, "Autopilot should append an audit event.");
+  assert(advance.snapshot.missionAssumptions.length === 1, "Autopilot should preserve mission assumptions.");
   assert(advance.artifactContent.artifactId === "art-acceptance", "Autopilot should return generated artifact content.");
   assert(advance.artifactContent.markdown.includes("Acceptance matrix handoff"), "Artifact markdown should include handoff context.");
 
@@ -433,10 +436,24 @@ try {
     method: "PUT",
     body: JSON.stringify({
       ...afterAdvance,
-      commandDraft: "Manual save from verification."
+      commandDraft: "Manual save from verification.",
+      assumptionDraft: "Repository verification workspace remains local.",
+      missionAssumptions: [{
+        id: "assumption-verification-local",
+        missionId: initialSession.missionId,
+        assumption: "Repository verification workspace remains local.",
+        source: "Verification intake",
+        ambiguityClass: "low",
+        confidence: 90,
+        impact: "Remote mutation remains disabled.",
+        ownerRoleId: "lead_ba",
+        reviewStatus: "open",
+        createdAt: "2026-06-18T10:35:00.000Z"
+      }]
     })
   });
   assert(saved.commandDraft === "Manual save from verification.", "PUT session should persist valid snapshots.");
+  assert(saved.missionAssumptions[0].assumption.includes("remains local"), "PUT session should persist mission assumptions.");
 
   const rejected = await fetch(`${baseUrl}/api/mission/session`, {
     method: "PUT",
@@ -448,6 +465,7 @@ try {
   const reset = await requestJson(`${baseUrl}/api/mission/reset`, { method: "POST" });
   assert(reset.runtime.autopilotCursor === 0, "Reset should restore autopilot cursor.");
   assert(reset.commandDraft.includes("Build sales analytics dashboard"), "Reset should restore default command.");
+  assert(reset.missionAssumptions.length === 1, "Reset should restore the default mission assumption.");
   const resetArtifacts = await requestJson(`${baseUrl}/api/mission/artifacts`);
   assert(resetArtifacts.length === 5, "Reset should restore seed artifact contents.");
   assert((await requestJson(`${baseUrl}/api/mission/agent-runs`)).length === 0, "Reset should clear agent run history.");

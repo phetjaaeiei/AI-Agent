@@ -17,6 +17,19 @@ export type CreateAssumptionInput = {
   createdAt?: string;
 };
 
+export type CreateAssumptionsFromDraftInput = {
+  missionId: string;
+  draft: string;
+  previousAssumptions?: readonly AssumptionRecord[];
+  source?: string;
+  ambiguityClass?: AmbiguityClass;
+  confidence?: number;
+  impact?: string;
+  ownerRoleId?: RoleId;
+  createdAt?: string;
+  limit?: number;
+};
+
 export function createAssumptionRecord(input: CreateAssumptionInput): AssumptionRecord {
   return {
     id: `assumption_${input.missionId}_${Math.abs(hashText(input.assumption)).toString(36)}`,
@@ -30,6 +43,50 @@ export function createAssumptionRecord(input: CreateAssumptionInput): Assumption
     reviewStatus: input.reviewStatus ?? "open",
     createdAt: input.createdAt ?? new Date().toISOString()
   };
+}
+
+export function createAssumptionsFromDraft(input: CreateAssumptionsFromDraftInput): AssumptionRecord[] {
+  const previousByText = new Map(
+    (input.previousAssumptions ?? []).map((record) => [normalizeAssumption(record.assumption), record])
+  );
+  const seen = new Set<string>();
+  const assumptions = input.draft
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      const normalized = normalizeAssumption(line);
+
+      if (!normalized || seen.has(normalized)) {
+        return false;
+      }
+
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, input.limit ?? 12);
+
+  return assumptions.map((assumption) => {
+    const previous = previousByText.get(normalizeAssumption(assumption));
+
+    if (previous?.missionId === input.missionId) {
+      return previous;
+    }
+
+    return createAssumptionRecord({
+      missionId: input.missionId,
+      assumption,
+      source: input.source ?? "Mission intake",
+      ambiguityClass: input.ambiguityClass ?? "medium",
+      confidence: input.confidence ?? 70,
+      impact: input.impact ?? "Verify before affected implementation evidence is accepted.",
+      ownerRoleId: input.ownerRoleId ?? "lead_ba",
+      ...(input.createdAt ? { createdAt: input.createdAt } : {})
+    });
+  });
+}
+
+export function formatAssumptionDraft(assumptions: readonly AssumptionRecord[]): string {
+  return assumptions.map((record) => record.assumption).join("\n");
 }
 
 export function shouldBlockForAmbiguity(ambiguityClass: AmbiguityClass): boolean {
@@ -56,4 +113,8 @@ function hashText(text: string): number {
     hash |= 0;
   }
   return hash;
+}
+
+function normalizeAssumption(assumption: string): string {
+  return assumption.trim().replace(/\s+/g, " ").toLowerCase();
 }

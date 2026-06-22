@@ -41,12 +41,14 @@ import {
   calculateMissionAgentWorkloads,
   calculateMissionRoomWorkloads,
   calculateAccuracyScore,
+  createAssumptionsFromDraft,
   createRuntimeArtifactContent,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
   createRuntimeMissionState,
   createRuntimeSessionSnapshot,
   createAssumptionRecord,
+  formatAssumptionDraft,
   parseMissionCommand,
   restoreRuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
@@ -62,6 +64,7 @@ import type {
   AgentRunEvent,
   AgentRunRecord,
   AgentRuntimeInfo,
+  AssumptionRecord,
   ArtifactStatus,
   ArtifactType,
   DepartmentId,
@@ -236,17 +239,6 @@ const accuracy = calculateAccuracyScore({
   consistency: 89,
   verifiability: 86,
   riskControl: 88
-});
-
-const assumption = createAssumptionRecord({
-  missionId: activeMission.id,
-  assumption: "Sales API already exposes daily totals and CSV-safe field names.",
-  source: "Mission brief and benchmark fixture",
-  ambiguityClass: "medium",
-  confidence: 72,
-  impact: "Backend developer must verify API shape before FE export work finishes.",
-  ownerRoleId: "lead_ba",
-  createdAt: "2026-06-18T10:30:00.000Z"
 });
 
 const roleDefinition = (roleId: RoleId) => ROLE_REGISTRY.find((role) => role.id === roleId) ?? ROLE_REGISTRY[0]!;
@@ -821,12 +813,30 @@ function createInitialAuditEvents(createdAt: string): RuntimeAuditEvent[] {
   ];
 }
 
+function createInitialMissionAssumptions(createdAt: string): AssumptionRecord[] {
+  return [
+    createAssumptionRecord({
+      missionId: activeMission.id,
+      assumption: "Sales API already exposes daily totals and CSV-safe field names.",
+      source: "Default mission intake",
+      ambiguityClass: "medium",
+      confidence: 72,
+      impact: "Backend developer must verify API shape before frontend export work finishes.",
+      ownerRoleId: "lead_ba",
+      createdAt
+    })
+  ];
+}
+
 function createDefaultRuntimeSession(savedAt: string): RuntimeSessionSnapshot {
   const missionPlan = parseMissionCommand(DEFAULT_MISSION_COMMAND);
+  const missionAssumptions = createInitialMissionAssumptions(savedAt);
 
   return createRuntimeSessionSnapshot({
     missionId: activeMission.id,
     commandDraft: DEFAULT_MISSION_COMMAND,
+    assumptionDraft: formatAssumptionDraft(missionAssumptions),
+    missionAssumptions,
     missionPlan,
     runtime: {
       gateRuns: initialGateRuns,
@@ -1061,6 +1071,8 @@ export function App() {
   const [autopilotCursor, setAutopilotCursor] = useState(initialSession.runtime.autopilotCursor);
   const [activeRouteIndex, setActiveRouteIndex] = useState(initialSession.runtime.activeRouteIndex);
   const [commandDraft, setCommandDraft] = useState(initialSession.commandDraft);
+  const [assumptionDraft, setAssumptionDraft] = useState(initialSession.assumptionDraft);
+  const [missionAssumptions, setMissionAssumptions] = useState<AssumptionRecord[]>([...initialSession.missionAssumptions]);
   const [missionPlan, setMissionPlan] = useState(initialSession.missionPlan);
   const [missionState, setMissionState] = useState(initialSession.missionState);
   const [lastSavedCommandDraft, setLastSavedCommandDraft] = useState(initialSession.commandDraft);
@@ -1105,16 +1117,22 @@ export function App() {
 
   function createCurrentRuntimeSession(
     savedAt: string,
-    nextMissionState: RuntimeMissionState = missionState,
-    nextMissionPlan: ReturnType<typeof parseMissionCommand> = missionPlan,
-    nextCommandDraft = commandDraft,
-    nextAuditEvents: readonly RuntimeAuditEvent[] = auditEvents
+    overrides: {
+      missionState?: RuntimeMissionState;
+      missionPlan?: ReturnType<typeof parseMissionCommand>;
+      commandDraft?: string;
+      assumptionDraft?: string;
+      missionAssumptions?: readonly AssumptionRecord[];
+      auditEvents?: readonly RuntimeAuditEvent[];
+    } = {}
   ): RuntimeSessionSnapshot {
     return createRuntimeSessionSnapshot({
       missionId: activeMission.id,
-      commandDraft: nextCommandDraft,
-      missionPlan: nextMissionPlan,
-      missionState: nextMissionState,
+      commandDraft: overrides.commandDraft ?? commandDraft,
+      assumptionDraft: overrides.assumptionDraft ?? assumptionDraft,
+      missionAssumptions: overrides.missionAssumptions ?? missionAssumptions,
+      missionPlan: overrides.missionPlan ?? missionPlan,
+      missionState: overrides.missionState ?? missionState,
       runtime: {
         gateRuns,
         taskRuns,
@@ -1129,13 +1147,15 @@ export function App() {
         selectedArtifactId
       },
       artifactRecords,
-      auditEvents: nextAuditEvents,
+      auditEvents: overrides.auditEvents ?? auditEvents,
       savedAt
     });
   }
 
   function applyRuntimeSessionSnapshot(snapshot: RuntimeSessionSnapshot) {
     setCommandDraft(snapshot.commandDraft);
+    setAssumptionDraft(snapshot.assumptionDraft);
+    setMissionAssumptions([...snapshot.missionAssumptions]);
     setMissionPlan(snapshot.missionPlan);
     setMissionState(snapshot.missionState);
     setGateRuns(snapshot.runtime.gateRuns as Record<QualityGateId, GateRun>);
@@ -1306,11 +1326,13 @@ export function App() {
     activeRouteIndex,
     activityLog,
     artifactRecords,
+    assumptionDraft,
     auditEvents,
     autopilotCursor,
     commandDraft,
     gateRuns,
     missionState,
+    missionAssumptions,
     missionPlan,
     selectedArtifactId,
     selectedGateId,
@@ -1338,6 +1360,23 @@ export function App() {
     );
   }
 
+  function updateAssumptionDraft(value: string) {
+    const savedAt = new Date().toISOString();
+
+    setAssumptionDraft(value);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft,
+        missionPlan,
+        savedAt,
+        previousState: current,
+        source: "local",
+        status: "draft",
+        statusReason: "Mission assumptions have local draft edits."
+      })
+    );
+  }
+
   async function saveMissionIntake() {
     if (isMissionSaving || isAutopilotRunning || commandDraft.trim().length === 0) {
       return;
@@ -1345,11 +1384,17 @@ export function App() {
 
     const savedAt = new Date().toISOString();
     const parsedPlan = parseMissionCommand(commandDraft);
+    const nextMissionAssumptions = createAssumptionsFromDraft({
+      missionId: activeMission.id,
+      draft: assumptionDraft,
+      previousAssumptions: missionAssumptions,
+      createdAt: savedAt
+    });
     const intakeAudit = createRuntimeAuditEvent({
       id: `audit-mission-intake-${Date.now()}`,
       actorRoleId: "chief_of_staff",
       action: "mission_saved",
-      summary: `Mission intake saved for ${parsedPlan.title}.`,
+      summary: `Mission intake saved for ${parsedPlan.title} with ${nextMissionAssumptions.length} assumptions.`,
       severity: "success",
       entityId: activeMission.id,
       createdAt: savedAt
@@ -1364,9 +1409,17 @@ export function App() {
       status: "saved",
       statusReason: "Mission intake saved to the orchestrator."
     });
-    const syncSnapshot = createCurrentRuntimeSession(savedAt, orchestratorMissionState, parsedPlan, commandDraft, nextAuditEvents);
+    const syncSnapshot = createCurrentRuntimeSession(savedAt, {
+      missionState: orchestratorMissionState,
+      missionPlan: parsedPlan,
+      commandDraft,
+      assumptionDraft,
+      missionAssumptions: nextMissionAssumptions,
+      auditEvents: nextAuditEvents
+    });
 
     setIsMissionSaving(true);
+    setMissionAssumptions(nextMissionAssumptions);
     setMissionPlan(parsedPlan);
     setMissionState(orchestratorMissionState);
     setAuditEvents(nextAuditEvents);
@@ -1388,9 +1441,17 @@ export function App() {
         status: "saved",
         statusReason: "Mission intake saved in browser memory because the orchestrator is unavailable."
       });
-      const localSnapshot = createCurrentRuntimeSession(savedAt, localMissionState, parsedPlan, commandDraft, nextAuditEvents);
+      const localSnapshot = createCurrentRuntimeSession(savedAt, {
+        missionState: localMissionState,
+        missionPlan: parsedPlan,
+        commandDraft,
+        assumptionDraft,
+        missionAssumptions: nextMissionAssumptions,
+        auditEvents: nextAuditEvents
+      });
 
       setMissionState(localMissionState);
+      setMissionAssumptions(nextMissionAssumptions);
       saveRuntimeSession(localSnapshot);
       setLastSavedAt(savedAt);
       setLastSavedCommandDraft(commandDraft);
@@ -1403,10 +1464,12 @@ export function App() {
 
   function resetMissionDraft() {
     const restoredCommand = lastSavedCommandDraft.trim() ? lastSavedCommandDraft : DEFAULT_MISSION_COMMAND;
+    const restoredAssumptionDraft = formatAssumptionDraft(missionAssumptions);
     const restoredPlan = parseMissionCommand(restoredCommand);
     const resetAt = new Date().toISOString();
 
     setCommandDraft(restoredCommand);
+    setAssumptionDraft(restoredAssumptionDraft);
     setMissionPlan(restoredPlan);
     setMissionState((current) =>
       createRuntimeMissionState({
@@ -1564,7 +1627,7 @@ export function App() {
       status: "running",
       statusReason: "Mission controller is executing the current intake."
     });
-    const syncSnapshot = createCurrentRuntimeSession(startedAt, runningMissionState);
+    const syncSnapshot = createCurrentRuntimeSession(startedAt, { missionState: runningMissionState });
 
     setIsAutopilotRunning(true);
     setMissionState(runningMissionState);
@@ -1894,13 +1957,16 @@ export function App() {
       <main className="workspace">
         <TopHud missionPlan={missionPlan} missionTitle={missionTitle} />
         <MissionIntakePanel
+          assumptionDraft={assumptionDraft}
           commandDraft={commandDraft}
           isAutopilotRunning={isAutopilotRunning}
           isSaving={isMissionSaving}
           lastSavedAt={lastSavedAt}
           lastSavedCommandDraft={lastSavedCommandDraft}
+          missionAssumptions={missionAssumptions}
           missionPlan={missionPlan}
           missionState={missionState}
+          onAssumptionChange={updateAssumptionDraft}
           onCommandChange={updateCommandDraft}
           onResetDraft={resetMissionDraft}
           onSaveMission={saveMissionIntake}
@@ -1937,6 +2003,7 @@ export function App() {
             artifacts={artifactEvidence}
             activeTask={activeTask}
             missionPlan={missionPlan}
+            missionAssumptions={missionAssumptions}
             modelTier={selectedRouting.modelTier}
             onCloseArtifact={() => setSelectedArtifactId("")}
             onSelectArtifact={setSelectedArtifactId}
@@ -2070,30 +2137,40 @@ function TopHud({
 }
 
 function MissionIntakePanel({
+  assumptionDraft,
   commandDraft,
   isAutopilotRunning,
   isSaving,
   lastSavedAt,
   lastSavedCommandDraft,
+  missionAssumptions,
   missionPlan,
   missionState,
+  onAssumptionChange,
   onCommandChange,
   onResetDraft,
   onSaveMission
 }: {
+  assumptionDraft: string;
   commandDraft: string;
   isAutopilotRunning: boolean;
   isSaving: boolean;
   lastSavedAt: string;
   lastSavedCommandDraft: string;
+  missionAssumptions: readonly AssumptionRecord[];
   missionPlan: ReturnType<typeof parseMissionCommand>;
   missionState: RuntimeMissionState;
+  onAssumptionChange: (value: string) => void;
   onCommandChange: (value: string) => void;
   onResetDraft: () => void;
   onSaveMission: () => void | Promise<void>;
 }) {
   const hasCommand = commandDraft.trim().length > 0;
-  const hasDraftChanges = commandDraft !== lastSavedCommandDraft || missionState.status === "draft";
+  const savedAssumptionDraft = formatAssumptionDraft(missionAssumptions);
+  const hasDraftChanges =
+    commandDraft !== lastSavedCommandDraft ||
+    assumptionDraft !== savedAssumptionDraft ||
+    missionState.status === "draft";
   const capabilityLabels = missionPlan.detectedCapabilities.slice(0, 4).map((capability) => capability.label);
   const riskLabels = missionPlan.risks.length > 0
     ? missionPlan.risks.slice(0, 3).map((risk) => `${risk.label} (${risk.level})`)
@@ -2121,17 +2198,30 @@ function MissionIntakePanel({
               {missionStateLabel[missionState.status]}
             </span>
           </div>
-          <label className="mission-command-field">
-            <span>Command</span>
-            <textarea
-              aria-label="Mission intake command"
-              onChange={(event) => onCommandChange(event.target.value)}
-              placeholder="Describe the next mission for the AI company"
-              rows={3}
-              spellCheck="false"
-              value={commandDraft}
-            />
-          </label>
+          <div className="mission-intake-fields">
+            <label className="mission-command-field">
+              <span>Command</span>
+              <textarea
+                aria-label="Mission intake command"
+                onChange={(event) => onCommandChange(event.target.value)}
+                placeholder="Describe the next mission for the AI company"
+                rows={3}
+                spellCheck="false"
+                value={commandDraft}
+              />
+            </label>
+            <label className="mission-command-field">
+              <span>Assumptions</span>
+              <textarea
+                aria-label="Mission assumptions"
+                onChange={(event) => onAssumptionChange(event.target.value)}
+                placeholder={"Sales API exposes daily totals\nCSV fields are export-safe"}
+                rows={3}
+                spellCheck="false"
+                value={assumptionDraft}
+              />
+            </label>
+          </div>
           <div className="mission-intake-chips" aria-label="Parsed mission intake">
             {[...capabilityLabels, ...riskLabels, ...missingInputLabels].slice(0, 8).map((label) => (
               <span key={label}>{label}</span>
@@ -2144,6 +2234,7 @@ function MissionIntakePanel({
             <span>{missionPlan.confidence}% confidence</span>
             <span>Saved {formatSavedAt(lastSavedAt)}</span>
             <span>{missionPlan.recommendedRoleIds.length} roles</span>
+            <span>{missionAssumptions.length} assumptions</span>
           </div>
           <div className="mission-intake-actions">
             <button disabled={isSaving || isAutopilotRunning || !hasDraftChanges} onClick={onResetDraft} type="button">
@@ -2481,6 +2572,7 @@ function MissionInspector({
   isGitRunning,
   isReviewRunning,
   isToolRunning,
+  missionAssumptions,
   missionPlan,
   selectedRole,
   selectedActiveRole,
@@ -2533,6 +2625,7 @@ function MissionInspector({
   isGitRunning: boolean;
   isReviewRunning: boolean;
   isToolRunning: boolean;
+  missionAssumptions: readonly AssumptionRecord[];
   missionPlan: ReturnType<typeof parseMissionCommand>;
   selectedRole: RoleId;
   selectedActiveRole: ActiveRole | undefined;
@@ -2714,11 +2807,21 @@ function MissionInspector({
           <AlertTriangle size={16} />
           <h3>Assumption Log</h3>
         </div>
-        <p>{assumption.assumption}</p>
-        <div className="assumption-meta">
-          <span>{assumption.ambiguityClass}</span>
-          <strong>{assumption.confidence}% confidence</strong>
-        </div>
+        {missionAssumptions.length > 0 ? (
+          <div className="assumption-list">
+            {missionAssumptions.slice(0, 4).map((assumption) => (
+              <article className="assumption-item" key={assumption.id}>
+                <p>{assumption.assumption}</p>
+                <div className="assumption-meta">
+                  <span>{assumption.ambiguityClass}</span>
+                  <strong>{assumption.confidence}% confidence</strong>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="assumption-empty">No assumptions saved for this mission.</p>
+        )}
       </section>
       <section className="artifact-list">
         <div className="section-title">

@@ -245,9 +245,17 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.mission-intake-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 0.7fr);
+  gap: 8px;
+  min-width: 0;
+}
+
 .mission-command-field {
   display: grid;
   gap: 5px;
+  min-width: 0;
 }
 
 .mission-command-field textarea {
@@ -260,6 +268,7 @@ button:focus-visible {
   font: inherit;
   font-size: 13px;
   line-height: 1.4;
+  min-height: 72px;
   outline: none;
   padding: 9px 10px;
   resize: vertical;
@@ -2355,12 +2364,30 @@ button:focus-visible {
   text-align: right;
 }
 
-.assumption-card p {
-  margin: 0 0 10px;
+.assumption-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assumption-item {
+  display: grid;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: 9px;
+}
+
+.assumption-item p,
+.assumption-empty {
+  margin: 0;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.assumption-empty {
+  color: var(--muted);
 }
 
 .assumption-meta span {
@@ -2942,6 +2969,10 @@ button:focus-visible {
 
   .mission-intake-form {
     padding: 10px;
+  }
+
+  .mission-intake-fields {
+    grid-template-columns: 1fr;
   }
 
   .mission-intake-heading {
