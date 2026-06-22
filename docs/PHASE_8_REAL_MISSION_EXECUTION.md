@@ -35,9 +35,12 @@ A user should be able to:
 
 ### H2: Mission History And Run Recovery
 
-- Add a mission history backed by persisted orchestrator state.
-- Reopen previous controller, tool, Git, review, CI, and delivery evidence.
-- Do not replay commits, pushes, PR creation, or destructive actions during recovery.
+- Mission history contracts now preserve session, controller, agent run/events, tool, Git, review, artifact, CI, and delivery evidence.
+- A create-once file-backed archive captures terminal controller states, previous retry attempts, and the current session before reset.
+- `GET /api/mission/history` lists the current run plus archived runs; `GET /api/mission/history/:historyId` opens one full evidence snapshot.
+- Mission Control renders a compact run history strip and a read-only recovery inspector for delivered, blocked, failed, and cancelled runs.
+- Recovery uses GET requests only and exposes no controller, agent, tool, Git, review, commit, push, or PR action controls.
+- See [MISSION_HISTORY_AND_RECOVERY.md](./MISSION_HISTORY_AND_RECOVERY.md).
 
 ### H3: Real Evidence Inspector
 
@@ -71,4 +74,4 @@ A user should be able to:
 
 - Phase 7 draft PR: `https://github.com/phetjaaeiei/AI-Agent/pull/1`
 - Current branch: `codex/phase-7-remote-mutation-policy`
-- Current implementation target: start H2 mission history and run recovery.
+- Current implementation target: start H3 Real Evidence Inspector.

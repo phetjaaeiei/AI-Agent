@@ -1,6 +1,6 @@
 # Next Implementation Plan: Phase 8 Real Mission Execution
 
-Status: Phase 8 H1 in progress after Phase 7 draft PR publication on 2026-06-22
+Status: Phase 8 H2 complete; H3 Real Evidence Inspector is next
 
 ## 1. Current Position
 
@@ -12,7 +12,7 @@ Phase 7 GitHub Repository Integration is complete through draft PR publication.
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication, draft PR creation, and read-only remote publication evidence.
+The app can now run local-first agent planning, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication, draft PR creation, read-only remote publication evidence, and read-only recovery of previous mission runs.
 
 ## 2. Phase 8 Goal
 
@@ -39,24 +39,21 @@ user mission
 
 ### Slice H1: Mission Intake And Session Source Of Truth
 
-- current progress: runtime snapshots now include a durable `missionState` lifecycle (`draft`, `saved`, `running`, `blocked`, `delivered`) shared by the web app and orchestrator services;
-- current progress: Mission Control now has an inline mission intake panel with dynamic title/command parsing, Save mission, Reset draft, server sync, and local fallback;
-- current progress: mission assumptions now persist as first-class `AssumptionRecord` data with a recoverable draft, backward-compatible snapshot restore, server sync, local fallback, and real inspector rendering;
-- replace remaining static/demo mission defaults with real persisted mission/run history;
-- persist mission title, command, assumptions, risks, selected autonomy mode, and created timestamp through the orchestrator;
-- keep local recovery if the orchestrator is unavailable;
-- show clear empty, draft, saved, running, blocked, and delivered mission states.
+- complete: runtime snapshots include a durable `missionState` lifecycle (`draft`, `saved`, `running`, `blocked`, `delivered`) shared by the web app and orchestrator services;
+- complete: Mission Control has inline command and assumption intake, Save mission, Reset draft, server sync, and local fallback;
+- complete: mission title, command, assumptions, risks, autonomy mode, and timestamps persist through the orchestrator.
 
 ### Slice H2: Mission History And Run Recovery
 
-- next implementation target;
-- add a mission/run list backed by persisted orchestrator state;
-- let users reopen a mission controller run, review packet, tool evidence, Git operation, and delivery packet;
-- distinguish current run, previous runs, cancelled runs, blocked runs, and delivered runs;
-- avoid replaying remote mutation or local commits during recovery.
+- complete: added a create-once mission history archive backed by `.data/mission-history.json`;
+- complete: controller terminal states, pre-retry attempts, and reset capture immutable evidence snapshots;
+- complete: `GET /api/mission/history` and `GET /api/mission/history/:historyId` expose current and archived runs without mutation endpoints;
+- complete: Mission Control distinguishes current, cancelled, blocked, failed, and delivered runs;
+- complete: the read-only recovery inspector reopens controller, agent, tool, Git, review, CI, artifact, and delivery evidence without replaying any action.
 
 ### Slice H3: Real Evidence Inspector
 
+- next implementation target;
 - make Artifact Memory and inspector panels prioritize real orchestrator artifacts over seeded demo artifacts;
 - add better filters for tool, Git, review, agent, and delivery evidence;
 - expose command output summaries without leaking denied paths or secrets;

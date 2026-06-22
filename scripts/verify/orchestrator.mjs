@@ -21,6 +21,8 @@ import { ReviewPacketService } from "../../dist/apps/orchestrator/src/review-pac
 import { FileReviewPacketStore } from "../../dist/apps/orchestrator/src/review-packet-store.js";
 import { MissionControllerService } from "../../dist/apps/orchestrator/src/mission-controller-service.js";
 import { FileMissionControllerStore } from "../../dist/apps/orchestrator/src/mission-controller-store.js";
+import { MissionHistoryService } from "../../dist/apps/orchestrator/src/mission-history-service.js";
+import { FileMissionHistoryStore } from "../../dist/apps/orchestrator/src/mission-history-store.js";
 import { createOrchestratorServer } from "../../dist/apps/orchestrator/src/server.js";
 
 const failures = [];
@@ -40,6 +42,7 @@ const toolCallStorePath = join(tempDir, "tool-calls.json");
 const gitOperationStorePath = join(tempDir, "git-operations.json");
 const reviewPacketStorePath = join(tempDir, "review-packets.json");
 const missionControllerStorePath = join(tempDir, "mission-controllers.json");
+const missionHistoryStorePath = join(tempDir, "mission-history.json");
 const workspacePath = join(tempDir, "workspace");
 const remotePath = join(tempDir, "workspace-origin.git");
 await mkdir(join(workspacePath, "docs"), { recursive: true });
@@ -64,6 +67,7 @@ const toolCallStore = new FileToolCallStore(toolCallStorePath);
 const gitOperationStore = new FileGitOperationStore(gitOperationStorePath);
 const reviewPacketStore = new FileReviewPacketStore(reviewPacketStorePath);
 const missionControllerStore = new FileMissionControllerStore(missionControllerStorePath);
+const missionHistoryStore = new FileMissionHistoryStore(missionHistoryStorePath);
 const eventBroker = new AgentRunEventBroker();
 const runService = new AgentRunService({
   executor: new DeterministicAgentExecutor(),
@@ -98,6 +102,17 @@ const reviewPacketService = new ReviewPacketService({
   toolCallService,
   now: () => "2026-06-18T10:33:00.000Z"
 });
+const missionHistoryService = new MissionHistoryService({
+  historyStore: missionHistoryStore,
+  missionStore: store,
+  controllerStore: missionControllerStore,
+  runStore,
+  toolCallStore,
+  gitOperationStore,
+  reviewPacketStore,
+  artifactStore,
+  now: () => "2026-06-18T10:34:30.000Z"
+});
 const missionControllerService = new MissionControllerService({
   controllerStore: missionControllerStore,
   missionStore: store,
@@ -106,6 +121,7 @@ const missionControllerService = new MissionControllerService({
   gitOperationService,
   reviewPacketService,
   reviewer: new DeterministicReviewExecutor(),
+  historyRecorder: missionHistoryService,
   now: () => "2026-06-18T10:34:00.000Z"
 });
 const server = createOrchestratorServer({
@@ -121,6 +137,7 @@ const server = createOrchestratorServer({
   gitOperationService,
   reviewPacketService,
   missionControllerService,
+  missionHistoryService,
   now: () => "2026-06-18T10:30:00.000Z"
 });
 const address = await new Promise((resolveAddress) => {
@@ -153,6 +170,8 @@ try {
   assert(initialSession.auditEvents.length === 1, "Initial session should include one seed audit event.");
   assert(initialSession.missionAssumptions.length === 1, "Initial session should include one saved mission assumption.");
   assert(initialSession.assumptionDraft.includes("Sales API"), "Initial session should expose editable assumption draft text.");
+  const initialHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  assert(initialHistory.length === 1 && initialHistory[0].kind === "current", "Mission history should start with the current session only.");
 
   const initialArtifacts = await requestJson(`${baseUrl}/api/mission/artifacts`);
   assert(initialArtifacts.length === 5, "Artifacts endpoint should return seed artifact contents.");
@@ -431,6 +450,21 @@ try {
   assert(fetchedController.id === missionController.id, "Mission controller detail endpoint should fetch by id.");
   const listedControllers = await requestJson(`${baseUrl}/api/mission/controllers?missionId=${encodeURIComponent(initialSession.missionId)}`);
   assert(listedControllers[0].id === missionController.id, "Mission controller list endpoint should return mission controllers.");
+  const cancelledHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  const cancelledArchive = cancelledHistory.find((item) => item.kind === "archived" && item.controllerId === missionController.id);
+  assert(cancelledArchive?.status === "cancelled", "Cancelling a controller should archive a cancelled read-only run.");
+  const cancelledHistoryDetail = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(cancelledArchive.id)}`);
+  assert(cancelledHistoryDetail.controller.status === "cancelled", "History detail should reopen the persisted controller state.");
+  assert(cancelledHistoryDetail.toolCalls.length === 3, "History detail should include prior mission tool evidence.");
+  assert(cancelledHistoryDetail.gitOperations.length === 11, "History detail should include prior mission Git evidence.");
+  assert(cancelledHistoryDetail.reviewPackets.length === 1, "History detail should include prior review evidence.");
+  const retriedController = await requestJson(`${baseUrl}/api/mission/controllers/${encodeURIComponent(missionController.id)}/retry`, { method: "POST" });
+  assert(retriedController.attempt === 2, "Retry should advance the controller attempt after archiving attempt one.");
+  const cancelledRetry = await requestJson(`${baseUrl}/api/mission/controllers/${encodeURIComponent(missionController.id)}/cancel`, { method: "POST" });
+  assert(cancelledRetry.status === "cancelled" && cancelledRetry.attempt === 2, "The retried controller should remain independently cancellable.");
+  const retryHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  assert(retryHistory.some((item) => item.kind === "archived" && item.attempt === 1), "Retry history should preserve attempt one.");
+  assert(retryHistory.some((item) => item.kind === "archived" && item.attempt === 2), "Retry history should archive attempt two separately.");
 
   const saved = await requestJson(`${baseUrl}/api/mission/session`, {
     method: "PUT",
@@ -473,6 +507,16 @@ try {
   assert((await requestJson(`${baseUrl}/api/mission/git-operations`)).length === 0, "Reset should clear Git operation history.");
   assert((await requestJson(`${baseUrl}/api/mission/review-packets`)).length === 0, "Reset should clear review packet history.");
   assert((await requestJson(`${baseUrl}/api/mission/controllers`)).length === 0, "Reset should clear mission controller history.");
+  const historyAfterReset = await requestJson(`${baseUrl}/api/mission/history`);
+  const archiveAfterReset = historyAfterReset.find((item) => item.id === cancelledArchive.id);
+  assert(historyAfterReset[0].kind === "current", "Reset should retain a current session at the top of history.");
+  assert(Boolean(archiveAfterReset), "Reset should retain an immutable archived run.");
+  const recoveredAfterReset = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(archiveAfterReset.id)}`);
+  assert(recoveredAfterReset.command === "Run a local autonomous mission.", "Recovery should preserve the original controller command after reset.");
+  assert(recoveredAfterReset.archiveReason === "controller_terminal", "Archived terminal runs should remain immutable when reset captures current state.");
+  assert(recoveredAfterReset.toolCalls.length === 3, "Recovery should preserve tool evidence after active stores reset.");
+  assert(recoveredAfterReset.gitOperations.length === 11, "Recovery should preserve Git evidence after active stores reset.");
+  assert(recoveredAfterReset.reviewPackets.length === 1, "Recovery should preserve review evidence after active stores reset.");
 } finally {
   await new Promise((resolveClose) => server.close(resolveClose));
   await rm(tempDir, { recursive: true, force: true });

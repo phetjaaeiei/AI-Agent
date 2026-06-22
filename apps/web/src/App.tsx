@@ -56,6 +56,8 @@ import type {
   RuntimeArtifactContent,
   RuntimeArtifactRecord,
   RuntimeAuditEvent,
+  MissionHistoryRecord,
+  MissionHistorySummary,
   RuntimeMissionLifecycleStatus,
   RuntimeMissionState,
   RuntimeSessionSnapshot
@@ -93,6 +95,8 @@ import {
   fetchGitPolicy,
   fetchMissionController,
   fetchMissionControllers,
+  fetchMissionHistory,
+  fetchMissionHistoryRecord,
   fetchOrchestratorArtifacts,
   fetchOrchestratorSession,
   fetchReviewPackets,
@@ -1060,6 +1064,7 @@ function calculateAgentWorkloads(taskRuns: Record<string, TaskRunStatus>): Parti
 
 export function App() {
   const [initialSession] = useState(loadRuntimeSession);
+  const [missionId, setMissionId] = useState(initialSession.missionId);
   const [selectedRoleId, setSelectedRoleId] = useState<RoleId>(initialSession.selection.selectedRoleId);
   const [selectedRoomId, setSelectedRoomId] = useState<DepartmentId>(initialSession.selection.selectedRoomId);
   const [selectedGateId, setSelectedGateId] = useState<QualityGateId>(initialSession.selection.selectedGateId);
@@ -1096,6 +1101,9 @@ export function App() {
   const [reviewPackets, setReviewPackets] = useState<ReviewPacket[]>([]);
   const [isReviewRunning, setIsReviewRunning] = useState(false);
   const [missionControllers, setMissionControllers] = useState<MissionControllerRecord[]>([]);
+  const [missionHistory, setMissionHistory] = useState<MissionHistorySummary[]>([]);
+  const [recoveredHistory, setRecoveredHistory] = useState<MissionHistoryRecord | undefined>();
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   const selectedGate = QUALITY_GATES.find((gate) => gate.id === selectedGateId) ?? QUALITY_GATES[0]!;
   const selectedGateRun = gateRuns[selectedGate.id];
@@ -1127,7 +1135,7 @@ export function App() {
     } = {}
   ): RuntimeSessionSnapshot {
     return createRuntimeSessionSnapshot({
-      missionId: activeMission.id,
+      missionId,
       commandDraft: overrides.commandDraft ?? commandDraft,
       assumptionDraft: overrides.assumptionDraft ?? assumptionDraft,
       missionAssumptions: overrides.missionAssumptions ?? missionAssumptions,
@@ -1153,6 +1161,7 @@ export function App() {
   }
 
   function applyRuntimeSessionSnapshot(snapshot: RuntimeSessionSnapshot) {
+    setMissionId(snapshot.missionId);
     setCommandDraft(snapshot.commandDraft);
     setAssumptionDraft(snapshot.assumptionDraft);
     setMissionAssumptions([...snapshot.missionAssumptions]);
@@ -1180,15 +1189,16 @@ export function App() {
       fetchOrchestratorSession(initialSession),
       fetchOrchestratorArtifacts(),
       fetchAgentRuntimeInfo(),
-      fetchAgentRuns(activeMission.id),
+      fetchAgentRuns(initialSession.missionId),
       fetchToolPolicy(),
-      fetchToolCalls(activeMission.id),
+      fetchToolCalls(initialSession.missionId),
       fetchGitPolicy(),
-      fetchGitOperations(activeMission.id),
-      fetchReviewPackets(activeMission.id),
-      fetchMissionControllers(activeMission.id)
+      fetchGitOperations(initialSession.missionId),
+      fetchReviewPackets(initialSession.missionId),
+      fetchMissionControllers(initialSession.missionId),
+      fetchMissionHistory()
     ])
-      .then(([snapshot, contents, runtimeInfo, runs, policy, calls, gitPolicy, gitOperations, reviewPackets, controllers]) => {
+      .then(([snapshot, contents, runtimeInfo, runs, policy, calls, gitPolicy, gitOperations, reviewPackets, controllers, history]) => {
         if (cancelled) {
           return;
         }
@@ -1203,6 +1213,7 @@ export function App() {
         setGitOperations(gitOperations);
         setReviewPackets(reviewPackets);
         setMissionControllers(controllers);
+        setMissionHistory(history);
         setIsAutopilotRunning(Boolean(
           controllers[0] && !isTerminalMissionController(controllers[0].status)
           || runs[0] && !isTerminalAgentRun(runs[0].status)
@@ -1233,7 +1244,7 @@ export function App() {
       try {
         const [controller, runs] = await Promise.all([
           fetchMissionController(controllerId),
-          fetchAgentRuns(activeMission.id)
+          fetchAgentRuns(missionId)
         ]);
         if (cancelled) return;
         setMissionControllers((items) => [controller, ...items.filter((item) => item.id !== controller.id)]);
@@ -1241,13 +1252,14 @@ export function App() {
         setIsAutopilotRunning(!isTerminalMissionController(controller.status));
         setOrchestratorMessage(controller.stopReason?.message ?? `Mission controller ${controller.status}: ${controller.currentStage.replaceAll("_", " ")}.`);
         if (isTerminalMissionController(controller.status)) {
-          const [snapshot, contents, calls, operations, packets, controllers] = await Promise.all([
+          const [snapshot, contents, calls, operations, packets, controllers, history] = await Promise.all([
             fetchOrchestratorSession(initialSession),
             fetchOrchestratorArtifacts(),
-            fetchToolCalls(activeMission.id),
-            fetchGitOperations(activeMission.id),
-            fetchReviewPackets(activeMission.id),
-            fetchMissionControllers(activeMission.id)
+            fetchToolCalls(missionId),
+            fetchGitOperations(missionId),
+            fetchReviewPackets(missionId),
+            fetchMissionControllers(missionId),
+            fetchMissionHistory()
           ]);
           if (cancelled) return;
           applyRuntimeSessionSnapshot(snapshot);
@@ -1256,6 +1268,7 @@ export function App() {
           setGitOperations(operations);
           setReviewPackets(packets);
           setMissionControllers(controllers);
+          setMissionHistory(history);
           setActivityFilter(controller.status === "completed" ? "phase" : "risk");
         }
       } catch (error) {
@@ -1269,7 +1282,7 @@ export function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeMissionController?.id, activeMissionController?.status]);
+  }, [activeMissionController?.id, activeMissionController?.status, missionId]);
 
   useEffect(() => {
     const runId = activeAgentRun?.id;
@@ -1385,7 +1398,7 @@ export function App() {
     const savedAt = new Date().toISOString();
     const parsedPlan = parseMissionCommand(commandDraft);
     const nextMissionAssumptions = createAssumptionsFromDraft({
-      missionId: activeMission.id,
+      missionId,
       draft: assumptionDraft,
       previousAssumptions: missionAssumptions,
       createdAt: savedAt
@@ -1396,7 +1409,7 @@ export function App() {
       action: "mission_saved",
       summary: `Mission intake saved for ${parsedPlan.title} with ${nextMissionAssumptions.length} assumptions.`,
       severity: "success",
-      entityId: activeMission.id,
+      entityId: missionId,
       createdAt: savedAt
     });
     const nextAuditEvents = [intakeAudit, ...auditEvents].slice(0, 200);
@@ -1429,6 +1442,7 @@ export function App() {
     try {
       const snapshot = await saveOrchestratorSession(syncSnapshot, syncSnapshot);
       applyRuntimeSessionSnapshot(snapshot);
+      setMissionHistory(await fetchMissionHistory());
       setOrchestratorStatus("connected");
       setOrchestratorMessage("Mission intake saved to the orchestrator.");
     } catch (error) {
@@ -1565,7 +1579,7 @@ export function App() {
       createdAt
     });
     const artifactContent = createRuntimeArtifactContent({
-      missionId: activeMission.id,
+      missionId,
       artifactRecord,
       missionPlan: parsedPlan,
       route,
@@ -1637,10 +1651,10 @@ export function App() {
     try {
       await saveOrchestratorSession(syncSnapshot, syncSnapshot);
       const controller = await startMissionController({
-        missionId: activeMission.id,
+        missionId,
         taskId: activeTask.id,
         command: commandDraft,
-        idempotencyKey: `${activeMission.id}:${activeTask.id}:${Date.now()}`,
+        idempotencyKey: `${missionId}:${activeTask.id}:${Date.now()}`,
         providerPreference: "auto"
       });
       setMissionControllers((items) => [controller, ...items.filter((item) => item.id !== controller.id)]);
@@ -1672,6 +1686,7 @@ export function App() {
       })
     );
     setIsAutopilotRunning(false);
+    setMissionHistory(await fetchMissionHistory());
   }
 
   async function retryActiveMissionController() {
@@ -1692,6 +1707,7 @@ export function App() {
     setIsAutopilotRunning(true);
     setOrchestratorStatus("connected");
     setOrchestratorMessage(`Retrying autonomous mission, attempt ${controller.attempt}/${controller.maxAttempts}.`);
+    setMissionHistory(await fetchMissionHistory());
   }
 
   async function cancelActiveAgentRun() {
@@ -1716,12 +1732,12 @@ export function App() {
     setOrchestratorMessage("Running a local workspace tool with policy checks.");
 
     try {
-      const call = await startToolCall({ ...input, missionId: activeMission.id });
+      const call = await startToolCall({ ...input, missionId });
       setToolCalls((calls) => [call, ...calls.filter((item) => item.id !== call.id)].slice(0, 20));
       const [snapshot, contents, calls] = await Promise.all([
         fetchOrchestratorSession(createCurrentRuntimeSession(new Date().toISOString())),
         fetchOrchestratorArtifacts(),
-        fetchToolCalls(activeMission.id)
+        fetchToolCalls(missionId)
       ]);
       applyRuntimeSessionSnapshot(snapshot);
       setArtifactContents(contents);
@@ -1762,12 +1778,12 @@ export function App() {
     setOrchestratorMessage("Running a local Git operation with policy checks.");
 
     try {
-      const operation = await startGitOperation({ ...input, missionId: activeMission.id });
+      const operation = await startGitOperation({ ...input, missionId });
       setGitOperations((operations) => [operation, ...operations.filter((item) => item.id !== operation.id)].slice(0, 20));
       const [snapshot, contents, operations] = await Promise.all([
         fetchOrchestratorSession(createCurrentRuntimeSession(new Date().toISOString())),
         fetchOrchestratorArtifacts(),
-        fetchGitOperations(activeMission.id)
+        fetchGitOperations(missionId)
       ]);
       applyRuntimeSessionSnapshot(snapshot);
       setArtifactContents(contents);
@@ -1899,9 +1915,9 @@ export function App() {
       const [snapshot, contents, calls, operations, packets] = await Promise.all([
         fetchOrchestratorSession(createCurrentRuntimeSession(new Date().toISOString())),
         fetchOrchestratorArtifacts(),
-        fetchToolCalls(activeMission.id),
-        fetchGitOperations(activeMission.id),
-        fetchReviewPackets(activeMission.id)
+        fetchToolCalls(missionId),
+        fetchGitOperations(missionId),
+        fetchReviewPackets(missionId)
       ]);
       applyRuntimeSessionSnapshot(snapshot);
       setArtifactContents(contents);
@@ -1921,7 +1937,7 @@ export function App() {
 
   function startReviewPacket() {
     void executeReviewAction("Creating a review packet from local evidence.", () => createReviewPacket({
-      missionId: activeMission.id,
+      missionId,
       taskId: activeTask.id,
       roleId: "tech_lead"
     }));
@@ -1951,6 +1967,23 @@ export function App() {
     if (packet) void executeReviewAction("Generating an offline Markdown delivery report.", () => createDeliveryPacket(packet.id));
   }
 
+  async function selectMissionHistory(summary: MissionHistorySummary) {
+    if (summary.kind === "current") {
+      setRecoveredHistory(undefined);
+      return;
+    }
+
+    setIsHistoryLoading(true);
+    try {
+      setRecoveredHistory(await fetchMissionHistoryRecord(summary.id));
+      setOrchestratorMessage(`Opened archived run ${summary.attempt ?? 1} in read-only recovery.`);
+    } catch (error) {
+      setOrchestratorMessage(`Mission recovery unavailable: ${formatOrchestratorError(error)}`);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <LeftNav />
@@ -1970,6 +2003,12 @@ export function App() {
           onCommandChange={updateCommandDraft}
           onResetDraft={resetMissionDraft}
           onSaveMission={saveMissionIntake}
+        />
+        <MissionHistoryPanel
+          history={missionHistory}
+          isLoading={isHistoryLoading}
+          onSelect={selectMissionHistory}
+          selectedHistoryId={recoveredHistory?.id ?? "current"}
         />
         <section className="main-grid" aria-label="HQ and Mission Control">
           <section className="war-room-panel">
@@ -1994,6 +2033,9 @@ export function App() {
               onSelectRoom={selectRoom}
             />
           </section>
+          {recoveredHistory ? (
+            <MissionRecoveryInspector history={recoveredHistory} />
+          ) : (
           <MissionInspector
             missionController={activeMissionController}
             agentRun={activeAgentRun}
@@ -2048,6 +2090,7 @@ export function App() {
             isGitRunning={isGitRunning}
             isReviewRunning={isReviewRunning}
           />
+          )}
         </section>
         <BottomDock
           activityFilter={activityFilter}
@@ -2260,6 +2303,231 @@ function HudMetric({ icon: Icon, label, value, tone }: { icon: LucideIcon; label
       <strong>{value}</strong>
     </div>
   );
+}
+
+function MissionHistoryPanel({
+  history,
+  isLoading,
+  onSelect,
+  selectedHistoryId
+}: {
+  history: readonly MissionHistorySummary[];
+  isLoading: boolean;
+  onSelect: (summary: MissionHistorySummary) => void | Promise<void>;
+  selectedHistoryId: string;
+}) {
+  return (
+    <section className="mission-history-band" aria-label="Mission run history">
+      <div className="mission-history-heading">
+        <div>
+          <Archive size={16} />
+          <h2>Mission history</h2>
+        </div>
+        <span>{Math.max(0, history.length - 1)} archived</span>
+      </div>
+      <div className="mission-history-list">
+        {history.length > 0 ? history.slice(0, 8).map((item) => (
+          <button
+            aria-pressed={selectedHistoryId === item.id}
+            className={selectedHistoryId === item.id ? "mission-history-row is-selected" : "mission-history-row"}
+            disabled={isLoading}
+            key={item.id}
+            onClick={() => void onSelect(item)}
+            type="button"
+          >
+            <span className={`history-status status-${item.status}`}>{item.kind === "current" ? "Current" : item.status}</span>
+            <span className="history-run-copy">
+              <strong>{item.title}</strong>
+              <small>
+                {item.controllerId ? `Run ${item.attempt ?? 1} · ${item.currentStage?.replaceAll("_", " ")}` : "Saved intake"}
+              </small>
+            </span>
+            <span className="history-evidence-count">
+              {item.toolCallCount + item.gitOperationCount + item.reviewPacketCount} evidence
+            </span>
+            <time dateTime={item.updatedAt}>{formatHistoryTimestamp(item.updatedAt)}</time>
+            <ChevronRight size={15} />
+          </button>
+        )) : (
+          <p className="mission-history-empty">History is available when the orchestrator is connected.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MissionRecoveryInspector({ history }: { history: MissionHistoryRecord }) {
+  const controller = history.controller;
+  const packet = history.reviewPackets[0];
+  const deliveryArtifactId = controller?.deliveryArtifactContentId ?? packet?.deliveryArtifactContentId;
+  const delivery = history.artifactContents.find((artifact) => artifact.id === deliveryArtifactId);
+  const stageResults = controller?.stageResults
+    .filter((result) => result.attempt === controller.attempt)
+    .sort((a, b) => missionControllerStages.indexOf(a.stage) - missionControllerStages.indexOf(b.stage)) ?? [];
+
+  return (
+    <aside className="inspector recovery-inspector" aria-label="Recovered mission evidence">
+      <div className="inspector-header">
+        <div>
+          <span>Read-only archive</span>
+          <h2>{history.title}</h2>
+        </div>
+        <Archive size={22} />
+      </div>
+      <div className="recovery-banner">
+        <ShieldCheck size={15} />
+        <span>Snapshot {formatHistoryTimestamp(history.archivedAt ?? history.updatedAt)}</span>
+        <strong className={`status-${history.status}`}>{history.status}</strong>
+      </div>
+
+      <section className="recovery-section" aria-label="Recovered controller run">
+        <div className="section-title">
+          <Play size={15} />
+          <h3>Controller run</h3>
+        </div>
+        {controller ? (
+          <>
+            <div className="recovery-facts">
+              <span>Attempt <strong>{controller.attempt}/{controller.maxAttempts}</strong></span>
+              <span>Stage <strong>{controller.currentStage.replaceAll("_", " ")}</strong></span>
+              <span>Provider <strong>{controller.providerPreference}</strong></span>
+            </div>
+            <ol className="recovery-stage-list">
+              {stageResults.map((result) => (
+                <li className={`status-${result.status}`} key={`${result.attempt}-${result.stage}`}>
+                  <strong>{result.stage.replaceAll("_", " ")}</strong>
+                  <span>{result.summary}</span>
+                </li>
+              ))}
+            </ol>
+            {controller.stopReason ? <p className="controller-stop-reason"><AlertTriangle size={13} /> {controller.stopReason.message}</p> : null}
+          </>
+        ) : <p className="recovery-empty">No controller run was attached to this intake.</p>}
+      </section>
+
+      <section className="recovery-section" aria-label="Recovered evidence totals">
+        <div className="section-title">
+          <Activity size={15} />
+          <h3>Evidence ledger</h3>
+        </div>
+        <div className="recovery-count-grid">
+          <span><strong>{history.agentRuns.length}</strong> Agent</span>
+          <span><strong>{history.toolCalls.length}</strong> Tool</span>
+          <span><strong>{history.gitOperations.length}</strong> Git</span>
+          <span><strong>{history.reviewPackets.length}</strong> Review</span>
+          <span><strong>{history.artifactContents.length}</strong> Artifacts</span>
+        </div>
+      </section>
+
+      <RecoveryEvidenceList
+        emptyLabel="No agent run evidence"
+        icon={Bot}
+        items={history.agentRuns.map((run) => ({
+          id: run.id,
+          label: `${shortRoleName(run.roleId)} · ${run.provider}`,
+          status: run.status,
+          summary: run.errorSummary ?? run.verification?.decision ?? `${run.usage.outputTokens} output tokens`
+        }))}
+        title="Agent runs"
+      />
+      <RecoveryEvidenceList
+        emptyLabel="No tool evidence"
+        icon={Code2}
+        items={history.toolCalls.map((call) => ({
+          id: call.id,
+          label: toolCallKindLabel[call.kind],
+          status: call.status,
+          summary: call.errorSummary ?? call.result?.summary ?? call.policy.reason
+        }))}
+        title="Tool evidence"
+      />
+      <RecoveryEvidenceList
+        emptyLabel="No Git evidence"
+        icon={GitBranch}
+        items={history.gitOperations.map((operation) => ({
+          id: operation.id,
+          label: gitOperationKindLabel[operation.kind],
+          status: operation.status,
+          summary: gitOperationSummary(operation)
+        }))}
+        title="Git operations"
+      />
+
+      <section className="recovery-section" aria-label="Recovered review packet">
+        <div className="section-title">
+          <ClipboardCheck size={15} />
+          <h3>Review and CI</h3>
+        </div>
+        {packet ? (
+          <>
+            <div className="recovery-facts">
+              <span>Status <strong>{packet.status.replaceAll("_", " ")}</strong></span>
+              <span>CI <strong>{packet.ciRun?.status ?? "not run"}</strong></span>
+              <span>Reviews <strong>{packet.reviews.length}/{packet.requiredReviewerRoleIds.length}</strong></span>
+            </div>
+            <p>{packet.summary}</p>
+          </>
+        ) : <p className="recovery-empty">No review packet was attached.</p>}
+      </section>
+
+      <section className="recovery-section recovery-delivery" aria-label="Recovered delivery packet">
+        <div className="section-title">
+          <FileText size={15} />
+          <h3>Delivery packet</h3>
+        </div>
+        {delivery ? (
+          <>
+            <strong>{delivery.title}</strong>
+            <p>{delivery.summary}</p>
+            {delivery.sections.slice(0, 3).map((section) => (
+              <div className="recovery-delivery-section" key={section.heading}>
+                <span>{section.heading}</span>
+                <p>{section.body}</p>
+              </div>
+            ))}
+          </>
+        ) : <p className="recovery-empty">No delivery packet was generated for this run.</p>}
+      </section>
+    </aside>
+  );
+}
+
+function RecoveryEvidenceList({
+  emptyLabel,
+  icon: Icon,
+  items,
+  title
+}: {
+  emptyLabel: string;
+  icon: LucideIcon;
+  items: readonly { id: string; label: string; status: string; summary: string }[];
+  title: string;
+}) {
+  return (
+    <section className="recovery-section" aria-label={title}>
+      <div className="section-title">
+        <Icon size={15} />
+        <h3>{title}</h3>
+      </div>
+      {items.length > 0 ? (
+        <div className="recovery-evidence-list">
+          {items.slice(0, 8).map((item) => (
+            <div className="recovery-evidence-row" key={item.id}>
+              <span className={`status-${item.status}`}>{item.status}</span>
+              <strong>{item.label}</strong>
+              <p>{item.summary}</p>
+            </div>
+          ))}
+        </div>
+      ) : <p className="recovery-empty">{emptyLabel}</p>}
+    </section>
+  );
+}
+
+function formatHistoryTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function PhaseTimeline({

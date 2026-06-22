@@ -19,6 +19,7 @@ import {
   calculateMissionAgentWorkloads,
   calculateMissionRoomWorkloads,
   createAssumptionsFromDraft,
+  createMissionHistorySummary,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
   createRuntimeSessionSnapshot,
@@ -27,6 +28,7 @@ import {
   getRaciForPhase,
   parseMissionCommand,
   passesQualityGate,
+  restoreMissionHistoryStoreSnapshot,
   restoreRuntimeSessionSnapshot
 } from "../../dist/packages/workflow/src/index.js";
 
@@ -381,6 +383,32 @@ assert(restoredSnapshot.snapshot.assumptionDraft.includes("Staging credentials")
 assert(restoredLegacySnapshot.ok, "Runtime session snapshot should restore legacy snapshots without assumptions.");
 assert(restoredLegacySnapshot.snapshot.missionAssumptions.length === 0, "Legacy runtime snapshots should recover with an empty assumption log.");
 assert(!rejectedSnapshot.ok, "Runtime session snapshot should reject unsupported schema.");
+
+const missionHistoryRecord = {
+  schemaVersion: 1,
+  id: "history-mission-runtime-test-session",
+  kind: "archived",
+  missionId: runtimeSnapshot.missionId,
+  title: runtimeSnapshot.missionState.title,
+  command: runtimeSnapshot.commandDraft,
+  status: "saved",
+  archiveReason: "mission_reset",
+  session: runtimeSnapshot,
+  agentRuns: [],
+  agentRunEvents: [],
+  toolCalls: [],
+  gitOperations: [],
+  reviewPackets: [],
+  artifactContents: [],
+  createdAt: runtimeSnapshot.missionState.createdAt,
+  updatedAt: runtimeSnapshot.savedAt,
+  archivedAt: runtimeSnapshot.savedAt
+};
+const restoredHistory = restoreMissionHistoryStoreSnapshot({ schemaVersion: 1, records: [missionHistoryRecord, { schemaVersion: 999 }] });
+const historySummary = createMissionHistorySummary(restoredHistory.records[0]);
+assert(restoredHistory.records.length === 1, "Mission history restore should reject malformed archive records.");
+assert(historySummary.kind === "archived" && historySummary.status === "saved", "Mission history summary should preserve archive state.");
+assert(historySummary.artifactCount === 0, "Mission history summary should expose bounded evidence counts.");
 
 if (failures.length > 0) {
   console.error("Foundation verification failed:");

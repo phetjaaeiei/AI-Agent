@@ -33,6 +33,12 @@ type MissionControllerServiceOptions = {
   gitOperationService: GitOperationService;
   reviewPacketService: ReviewPacketService;
   reviewer: ReviewExecutor;
+  historyRecorder?: {
+    captureController(
+      controller: MissionControllerRecord,
+      archiveReason?: "controller_terminal" | "before_retry"
+    ): Promise<unknown>;
+  };
   now?: () => string;
   maxAttempts?: number;
   reviewerRevisionLimit?: number;
@@ -117,6 +123,7 @@ export class MissionControllerService {
       updatedAt: completedAt
     });
     await this.persistActivity(cancelled, "Mission controller cancelled", cancelled.stopReason!.message, "warning");
+    await this.options.historyRecorder?.captureController(cancelled);
     return cancelled;
   }
 
@@ -124,6 +131,7 @@ export class MissionControllerService {
     const controller = await this.requireController(controllerId);
     if (!isTerminal(controller.status) || controller.status === "completed") throw new Error("Only blocked, failed, or cancelled controllers can be retried.");
     if (controller.attempt >= controller.maxAttempts) throw new Error("Mission controller retry limit reached.");
+    await this.options.historyRecorder?.captureController(controller, "before_retry");
     const {
       agentRunId: _agentRunId,
       reviewPacketId: _reviewPacketId,
@@ -193,6 +201,7 @@ export class MissionControllerService {
       const completedAt = this.now();
       controller = await this.patch(controller, { status: "completed", completedAt, updatedAt: completedAt });
       await this.persistActivity(controller, "Mission completed", "All local stages passed and the delivery report is ready.", "success");
+      await this.options.historyRecorder?.captureController(controller);
     } catch (error) {
       const persisted = await this.getController(controllerId);
       if (!persisted || persisted.status === "cancelled") return;
@@ -216,6 +225,7 @@ export class MissionControllerService {
         updatedAt: completedAt
       });
       await this.persistActivity(controller, status === "failed" ? "Mission controller failed" : "Mission controller stopped", stopped.message, status === "failed" ? "danger" : "warning");
+      await this.options.historyRecorder?.captureController(controller);
     } finally {
       this.active.delete(controllerId);
     }

@@ -481,7 +481,25 @@
   - screenshots saved at `/tmp/team-ai-agent-controller-desktop.png` and `/tmp/team-ai-agent-controller-mobile.png`.
 - In-app Browser was unavailable in the session, so rendered checks used the repo's Playwright dependency.
 
+### Phase 8 H2 Mission History And Run Recovery
+
+- Added versioned mission history record, summary, status, archive-reason, and store contracts.
+- Added a create-once file-backed mission history archive with 100-record retention.
+- Added a mission history aggregation service that captures the runtime session, controller, agent runs/events, tool calls, Git operations, review packets, CI results, artifacts, and delivery packet.
+- Terminal completed, blocked, failed, and cancelled controllers are archived automatically.
+- Retry archives the previous attempt before mutating the active controller, preserving attempt one and attempt two as separate records.
+- Mission reset archives the current state before clearing active run, tool, Git, review, artifact, and controller stores.
+- Added read-only `GET /api/mission/history` and `GET /api/mission/history/:historyId` endpoints; no history mutation or replay endpoint exists.
+- Added a compact Mission History strip and read-only recovery inspector for controller stages, agent runs, tool evidence, Git evidence, review/CI state, and delivery content.
+- Recovery mode replaces action-bearing inspector controls and returns to the current run from the Current history row.
+- Added [MISSION_HISTORY_AND_RECOVERY.md](./MISSION_HISTORY_AND_RECOVERY.md).
+- Full verification passed: `typecheck`, foundation, agent runtime, tool runner, Git runner, review packet, mission controller, orchestrator, web build, and `git diff --check`.
+- Orchestrator verification covers terminal capture, immutable reset behavior, separate retry attempts, evidence recovery after active stores reset, and current/archived list behavior.
+- Rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`.
+- Desktop `1440x900` and mobile `390x844` QA confirmed current/archived selection, GET-only recovery, read-only controls, no framework overlay, no console warnings/errors, no failed responses, no horizontal overflow, and no clipped recovery rows.
+- QA screenshots are outside the repository at `/tmp/team-ai-agent-h2-recovery-desktop.png`, `/tmp/team-ai-agent-h2-history-mobile.png`, and `/tmp/team-ai-agent-h2-recovery-mobile.png`.
+
 ### Next
 
-- Continue Phase 8 with H2 Mission History And Run Recovery.
+- Continue Phase 8 with H3 Real Evidence Inspector.
 - Keep merge, deployment, production actions, force push, branch deletion, and destructive Git reset/checkout disabled.
