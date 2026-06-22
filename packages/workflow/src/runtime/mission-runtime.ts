@@ -75,6 +75,17 @@ export type RuntimeSelection = {
 
 export type RuntimeTransitionResult = RuntimeState & RuntimeSelection;
 
+export type RuntimeMissionLifecycleStatus = "draft" | "saved" | "running" | "blocked" | "delivered";
+
+export type RuntimeMissionState = {
+  status: RuntimeMissionLifecycleStatus;
+  title: string;
+  source: "local" | "orchestrator" | "agent_runtime" | "mission_controller" | "review_service";
+  statusReason: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RuntimeArtifactRecord = {
   id: string;
   artifactId: string;
@@ -150,6 +161,7 @@ export type RuntimeSessionSnapshot = {
   missionId: string;
   commandDraft: string;
   missionPlan: ParsedMissionCommand;
+  missionState: RuntimeMissionState;
   runtime: RuntimeState;
   selection: RuntimeSelection;
   artifactRecords: readonly RuntimeArtifactRecord[];
@@ -549,6 +561,27 @@ export function createRuntimeAuditEvent(input: {
   };
 }
 
+export function createRuntimeMissionState(input: {
+  commandDraft: string;
+  missionPlan: ParsedMissionCommand;
+  savedAt: string;
+  previousState?: RuntimeMissionState;
+  source?: RuntimeMissionState["source"];
+  status?: RuntimeMissionLifecycleStatus;
+  statusReason?: string;
+}): RuntimeMissionState {
+  const status = input.status ?? input.previousState?.status ?? "saved";
+
+  return {
+    status,
+    title: input.missionPlan.title || createMissionTitle(input.commandDraft),
+    source: input.source ?? input.previousState?.source ?? "local",
+    statusReason: input.statusReason ?? input.previousState?.statusReason ?? defaultMissionStateReason(status),
+    createdAt: input.previousState?.createdAt ?? input.savedAt,
+    updatedAt: input.savedAt
+  };
+}
+
 export function restoreRuntimeArtifactContents(candidate: unknown): RuntimeArtifactContent[] {
   if (!Array.isArray(candidate)) {
     return [];
@@ -561,17 +594,33 @@ export function createRuntimeSessionSnapshot(input: {
   missionId: string;
   commandDraft: string;
   missionPlan: ParsedMissionCommand;
+  missionState?: RuntimeMissionState;
   runtime: RuntimeState;
   selection: RuntimeSelection;
   artifactRecords: readonly RuntimeArtifactRecord[];
   auditEvents: readonly RuntimeAuditEvent[];
   savedAt: string;
 }): RuntimeSessionSnapshot {
+  const missionStateInput = input.missionState
+    ? {
+        previousState: input.missionState,
+        source: input.missionState.source,
+        status: input.missionState.status,
+        statusReason: input.missionState.statusReason
+      }
+    : {};
+
   return {
     schemaVersion: RUNTIME_SESSION_SCHEMA_VERSION,
     missionId: input.missionId,
     commandDraft: input.commandDraft,
     missionPlan: input.missionPlan,
+    missionState: createRuntimeMissionState({
+      commandDraft: input.commandDraft,
+      missionPlan: input.missionPlan,
+      savedAt: input.savedAt,
+      ...missionStateInput
+    }),
     runtime: input.runtime,
     selection: input.selection,
     artifactRecords: input.artifactRecords,
@@ -602,15 +651,37 @@ export function restoreRuntimeSessionSnapshot(
     };
   }
 
+  const snapshot = candidate as RuntimeSessionSnapshot;
+  const missionStateInput = isRuntimeMissionState(snapshot.missionState) ? { missionState: snapshot.missionState } : {};
+  const restoredSnapshot = createRuntimeSessionSnapshot({
+    missionId: snapshot.missionId,
+    commandDraft: snapshot.commandDraft,
+    missionPlan: snapshot.missionPlan,
+    ...missionStateInput,
+    runtime: snapshot.runtime,
+    selection: snapshot.selection,
+    artifactRecords: snapshot.artifactRecords,
+    auditEvents: snapshot.auditEvents,
+    savedAt: snapshot.savedAt
+  });
+
   return {
     ok: true,
-    snapshot: candidate,
+    snapshot: restoredSnapshot,
     recoveredFrom: "snapshot"
   };
 }
 
 function createEmptyWorkload(): RuntimeWorkload {
   return { active: 0, queued: 0, blocked: 0, passed: 0, total: 0 };
+}
+
+function defaultMissionStateReason(status: RuntimeMissionLifecycleStatus): string {
+  if (status === "draft") return "Mission command has local draft edits.";
+  if (status === "running") return "Mission controller is executing the current intake.";
+  if (status === "blocked") return "Mission needs review before it can continue.";
+  if (status === "delivered") return "Mission delivery evidence is ready.";
+  return "Mission intake is saved and ready for local execution.";
 }
 
 function detectMissionRisks(normalizedCommand: string): ParsedMissionRisk[] {
@@ -709,10 +780,40 @@ function isRuntimeSessionSnapshot(value: unknown): value is RuntimeSessionSnapsh
     typeof snapshot.commandDraft === "string" &&
     typeof snapshot.savedAt === "string" &&
     Boolean(snapshot.missionPlan) &&
+    (snapshot.missionState === undefined || isRuntimeMissionState(snapshot.missionState)) &&
     Boolean(snapshot.runtime) &&
     Boolean(snapshot.selection) &&
     Array.isArray(snapshot.artifactRecords) &&
     Array.isArray(snapshot.auditEvents)
+  );
+}
+
+function isRuntimeMissionState(value: unknown): value is RuntimeMissionState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const state = value as Partial<RuntimeMissionState>;
+
+  return (
+    (
+      state.status === "draft" ||
+      state.status === "saved" ||
+      state.status === "running" ||
+      state.status === "blocked" ||
+      state.status === "delivered"
+    ) &&
+    typeof state.title === "string" &&
+    (
+      state.source === "local" ||
+      state.source === "orchestrator" ||
+      state.source === "agent_runtime" ||
+      state.source === "mission_controller" ||
+      state.source === "review_service"
+    ) &&
+    typeof state.statusReason === "string" &&
+    typeof state.createdAt === "string" &&
+    typeof state.updatedAt === "string"
   );
 }
 

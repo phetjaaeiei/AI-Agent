@@ -1,6 +1,6 @@
 # Next Implementation Plan: Phase 8 Real Mission Execution
 
-Status: Phase 8 opened after Phase 7 draft PR publication on 2026-06-22
+Status: Phase 8 H1 in progress after Phase 7 draft PR publication on 2026-06-22
 
 ## 1. Current Position
 
@@ -39,6 +39,7 @@ user mission
 
 ### Slice H1: Mission Intake And Session Source Of Truth
 
+- current progress: runtime snapshots now include a durable `missionState` lifecycle (`draft`, `saved`, `running`, `blocked`, `delivered`) shared by the web app and orchestrator services;
 - replace remaining static/demo mission defaults with an explicit mission intake flow;
 - persist mission title, command, assumptions, risks, selected autonomy mode, and created timestamp through the orchestrator;
 - keep local recovery if the orchestrator is unavailable;

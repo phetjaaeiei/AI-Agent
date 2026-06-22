@@ -2520,6 +2520,36 @@ button:focus-visible {
   color: oklch(0.42 0.1 25);
 }
 
+.command-meta .mission-state.status-draft {
+  border-color: oklch(0.72 0.09 72);
+  background: oklch(0.95 0.045 72);
+  color: oklch(0.38 0.09 72);
+}
+
+.command-meta .mission-state.status-saved {
+  border-color: oklch(0.68 0.08 155);
+  background: oklch(0.93 0.04 155);
+  color: oklch(0.34 0.08 155);
+}
+
+.command-meta .mission-state.status-running {
+  border-color: oklch(0.66 0.1 230);
+  background: oklch(0.93 0.035 230);
+  color: oklch(0.34 0.08 230);
+}
+
+.command-meta .mission-state.status-blocked {
+  border-color: oklch(0.68 0.12 28);
+  background: oklch(0.94 0.045 28);
+  color: oklch(0.42 0.12 28);
+}
+
+.command-meta .mission-state.status-delivered {
+  border-color: oklch(0.63 0.11 180);
+  background: oklch(0.92 0.045 180);
+  color: oklch(0.31 0.08 180);
+}
+
 .command-meta .runtime-provider.status-ollama {
   border-color: oklch(0.68 0.08 155);
   background: oklch(0.92 0.04 155);

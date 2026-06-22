@@ -16,6 +16,7 @@ import { DEFAULT_LOCAL_CI_COMMANDS } from "../../../packages/shared/src/index.js
 import {
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
 import type { RuntimeActivityEvent, RuntimeArtifactContent, RuntimeArtifactSection } from "../../../packages/workflow/src/index.js";
@@ -184,6 +185,15 @@ export class ReviewPacketService {
     await this.options.artifactStore.appendArtifact(artifact);
     await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
       ...current,
+      missionState: createRuntimeMissionState({
+        commandDraft: current.commandDraft,
+        missionPlan: current.missionPlan,
+        savedAt: createdAt,
+        previousState: current.missionState,
+        source: "review_service",
+        status: assessed.status === "ready" ? "delivered" : "blocked",
+        statusReason: artifactRecord.summary
+      }),
       selection: {
         ...current.selection,
         selectedRoleId: "technical_writer",

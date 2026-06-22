@@ -14,6 +14,7 @@ import type {
 } from "../../../packages/shared/src/index.js";
 import {
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
 import type { RuntimeActivityEvent } from "../../../packages/workflow/src/index.js";
@@ -392,6 +393,8 @@ export class MissionControllerService {
     const current = await this.options.missionStore.readSession();
     const createdAt = this.now();
     const terminal = isTerminal(controller.status);
+    const missionStatus = controller.status === "completed" ? "delivered" : terminal ? "blocked" : "running";
+    const statusReason = controller.stopReason?.message ?? summary;
     const activity: RuntimeActivityEvent = {
       id: `evt-controller-${controller.id}-${controller.status}-${controller.attempt}`,
       roleId: terminal && controller.status === "completed" ? "chief_of_staff" : "project_manager",
@@ -403,6 +406,15 @@ export class MissionControllerService {
     };
     await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
       ...current,
+      missionState: createRuntimeMissionState({
+        commandDraft: current.commandDraft,
+        missionPlan: current.missionPlan,
+        savedAt: createdAt,
+        previousState: current.missionState,
+        source: "mission_controller",
+        status: missionStatus,
+        statusReason
+      }),
       runtime: {
         ...current.runtime,
         activityLog: [activity, ...current.runtime.activityLog].slice(0, 80)

@@ -44,6 +44,7 @@ import {
   createRuntimeArtifactContent,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot,
   createAssumptionRecord,
   parseMissionCommand,
@@ -53,6 +54,8 @@ import type {
   RuntimeArtifactContent,
   RuntimeArtifactRecord,
   RuntimeAuditEvent,
+  RuntimeMissionLifecycleStatus,
+  RuntimeMissionState,
   RuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
 import type {
@@ -689,6 +692,14 @@ const orchestratorStatusLabel: Record<OrchestratorConnectionStatus, string> = {
   local: "Local fallback"
 };
 
+const missionStateLabel: Record<RuntimeMissionLifecycleStatus, string> = {
+  draft: "Draft",
+  saved: "Saved",
+  running: "Running",
+  blocked: "Blocked",
+  delivered: "Delivered"
+};
+
 const agentRunStatusLabel: Record<AgentRunRecord["status"], string> = {
   queued: "Queued",
   running: "Planning",
@@ -811,10 +822,12 @@ function createInitialAuditEvents(createdAt: string): RuntimeAuditEvent[] {
 }
 
 function createDefaultRuntimeSession(savedAt: string): RuntimeSessionSnapshot {
+  const missionPlan = parseMissionCommand(DEFAULT_MISSION_COMMAND);
+
   return createRuntimeSessionSnapshot({
     missionId: activeMission.id,
     commandDraft: DEFAULT_MISSION_COMMAND,
-    missionPlan: parseMissionCommand(DEFAULT_MISSION_COMMAND),
+    missionPlan,
     runtime: {
       gateRuns: initialGateRuns,
       taskRuns: initialTaskRuns,
@@ -1049,6 +1062,7 @@ export function App() {
   const [activeRouteIndex, setActiveRouteIndex] = useState(initialSession.runtime.activeRouteIndex);
   const [commandDraft, setCommandDraft] = useState(initialSession.commandDraft);
   const [missionPlan, setMissionPlan] = useState(initialSession.missionPlan);
+  const [missionState, setMissionState] = useState(initialSession.missionState);
   const [artifactRecords, setArtifactRecords] = useState<RuntimeArtifactRecord[]>([...initialSession.artifactRecords]);
   const [artifactContents, setArtifactContents] = useState<RuntimeArtifactContent[]>(() => createArtifactContentsFromSession(initialSession));
   const [auditEvents, setAuditEvents] = useState<RuntimeAuditEvent[]>([...initialSession.auditEvents]);
@@ -1086,11 +1100,12 @@ export function App() {
   const roomWorkloads = useMemo(() => calculateRoomWorkloads(taskRuns), [taskRuns]);
   const agentWorkloads = useMemo(() => calculateAgentWorkloads(taskRuns), [taskRuns]);
 
-  function createCurrentRuntimeSession(savedAt: string): RuntimeSessionSnapshot {
+  function createCurrentRuntimeSession(savedAt: string, nextMissionState: RuntimeMissionState = missionState): RuntimeSessionSnapshot {
     return createRuntimeSessionSnapshot({
       missionId: activeMission.id,
       commandDraft,
       missionPlan,
+      missionState: nextMissionState,
       runtime: {
         gateRuns,
         taskRuns,
@@ -1113,6 +1128,7 @@ export function App() {
   function applyRuntimeSessionSnapshot(snapshot: RuntimeSessionSnapshot) {
     setCommandDraft(snapshot.commandDraft);
     setMissionPlan(snapshot.missionPlan);
+    setMissionState(snapshot.missionState);
     setGateRuns(snapshot.runtime.gateRuns as Record<QualityGateId, GateRun>);
     setTaskRuns(snapshot.runtime.taskRuns as Record<string, TaskRunStatus>);
     setActivityLog(snapshot.runtime.activityLog as ActivityEvent[]);
@@ -1284,6 +1300,7 @@ export function App() {
     autopilotCursor,
     commandDraft,
     gateRuns,
+    missionState,
     missionPlan,
     selectedArtifactId,
     selectedGateId,
@@ -1291,6 +1308,25 @@ export function App() {
     selectedRoomId,
     taskRuns
   ]);
+
+  function updateCommandDraft(value: string) {
+    const savedAt = new Date().toISOString();
+    const nextPlan = parseMissionCommand(value);
+
+    setCommandDraft(value);
+    setMissionPlan(nextPlan);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft: value,
+        missionPlan: nextPlan,
+        savedAt,
+        previousState: current,
+        source: "local",
+        status: "draft",
+        statusReason: "Mission command has local draft edits."
+      })
+    );
+  }
 
   function selectRole(role: ActiveRole) {
     setSelectedRoleId(role.roleId);
@@ -1382,6 +1418,17 @@ export function App() {
     });
 
     setMissionPlan(parsedPlan);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft,
+        missionPlan: parsedPlan,
+        savedAt: createdAt,
+        previousState: current,
+        source: "local",
+        status: "saved",
+        statusReason: "Local fallback advanced one mission step."
+      })
+    );
     setGateRuns(transition.gateRuns as Record<QualityGateId, GateRun>);
     setActivityLog(transition.activityLog as ActivityEvent[]);
     setArtifactRecords((records) => [artifactRecord, ...records].slice(0, 50));
@@ -1413,9 +1460,20 @@ export function App() {
       return;
     }
 
-    const syncSnapshot = createCurrentRuntimeSession(new Date().toISOString());
+    const startedAt = new Date().toISOString();
+    const runningMissionState = createRuntimeMissionState({
+      commandDraft,
+      missionPlan,
+      savedAt: startedAt,
+      previousState: missionState,
+      source: "mission_controller",
+      status: "running",
+      statusReason: "Mission controller is executing the current intake."
+    });
+    const syncSnapshot = createCurrentRuntimeSession(startedAt, runningMissionState);
 
     setIsAutopilotRunning(true);
+    setMissionState(runningMissionState);
     setOrchestratorStatus("syncing");
     setOrchestratorMessage("Saving the current mission state before server autopilot.");
 
@@ -1445,6 +1503,17 @@ export function App() {
     if (!activeMissionController || isTerminalMissionController(activeMissionController.status)) return;
     const controller = await cancelMissionController(activeMissionController.id);
     setMissionControllers((items) => [controller, ...items.filter((item) => item.id !== controller.id)]);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft,
+        missionPlan,
+        savedAt: controller.updatedAt,
+        previousState: current,
+        source: "mission_controller",
+        status: "blocked",
+        statusReason: controller.stopReason?.message ?? "Mission controller was cancelled."
+      })
+    );
     setIsAutopilotRunning(false);
   }
 
@@ -1452,6 +1521,17 @@ export function App() {
     if (!activeMissionController || !["blocked", "failed", "cancelled"].includes(activeMissionController.status)) return;
     const controller = await retryMissionController(activeMissionController.id);
     setMissionControllers((items) => [controller, ...items.filter((item) => item.id !== controller.id)]);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft,
+        missionPlan,
+        savedAt: controller.updatedAt,
+        previousState: current,
+        source: "mission_controller",
+        status: "running",
+        statusReason: `Retrying autonomous mission, attempt ${controller.attempt}/${controller.maxAttempts}.`
+      })
+    );
     setIsAutopilotRunning(true);
     setOrchestratorStatus("connected");
     setOrchestratorMessage(`Retrying autonomous mission, attempt ${controller.attempt}/${controller.maxAttempts}.`);
@@ -1805,9 +1885,10 @@ export function App() {
           isAutopilotRunning={isAutopilotRunning}
           lastSavedAt={lastSavedAt}
           onFilterChange={setActivityFilter}
-          onCommandChange={setCommandDraft}
+          onCommandChange={updateCommandDraft}
           onRunAutopilot={runAutopilotStep}
           missionPlan={missionPlan}
+          missionState={missionState}
           orchestratorMessage={orchestratorMessage}
           orchestratorStatus={orchestratorStatus}
           agentRuntimeInfo={agentRuntimeInfo}
@@ -3013,6 +3094,7 @@ function BottomDock({
   isAutopilotRunning,
   lastSavedAt,
   missionPlan,
+  missionState,
   onCommandChange,
   onFilterChange,
   onRunAutopilot,
@@ -3028,6 +3110,7 @@ function BottomDock({
   isAutopilotRunning: boolean;
   lastSavedAt: string;
   missionPlan: ReturnType<typeof parseMissionCommand>;
+  missionState: RuntimeMissionState;
   onCommandChange: (value: string) => void;
   onFilterChange: (filter: ActivityFilter) => void;
   onRunAutopilot: () => void | Promise<void>;
@@ -3057,6 +3140,9 @@ function BottomDock({
           <div className="command-meta" aria-label="Mission session memory status">
             <span className={`command-status status-${orchestratorStatus}`} title={orchestratorMessage}>
               {orchestratorStatusLabel[orchestratorStatus]}
+            </span>
+            <span className={`mission-state status-${missionState.status}`} title={missionState.statusReason}>
+              {missionStateLabel[missionState.status]}
             </span>
             <span className={`runtime-provider status-${agentRuntimeInfo.activeProvider}`} title={agentRuntimeInfo.message}>
               {agentRuntimeInfo.activeProvider === "ollama" ? `Ollama ${agentRuntimeInfo.model}` : "Deterministic mode"}

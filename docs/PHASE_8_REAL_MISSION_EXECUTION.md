@@ -21,6 +21,9 @@ A user should be able to:
 
 ### H1: Mission Intake And Session Source Of Truth
 
+- Runtime session snapshots now carry a durable `missionState` object with lifecycle status, title, source, reason, created timestamp, and updated timestamp.
+- Command edits in Mission Control update the parsed mission plan and mark the mission as a local draft.
+- The orchestrator, agent runtime, review delivery, and mission controller update mission lifecycle state when they advance, block, or deliver a mission.
 - Add explicit mission creation and saved/draft/running/block/delivered states.
 - Persist mission command, title, assumptions, risks, autonomy mode, and timestamps through the orchestrator.
 - Keep local recovery when the orchestrator is unavailable.
@@ -64,4 +67,4 @@ A user should be able to:
 
 - Phase 7 draft PR: `https://github.com/phetjaaeiei/AI-Agent/pull/1`
 - Current branch: `codex/phase-7-remote-mutation-policy`
-- Next implementation target: H1 Mission Intake And Session Source Of Truth
+- Current implementation target: continue H1 with explicit new mission intake and seeded-data demotion.

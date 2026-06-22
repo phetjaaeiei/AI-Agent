@@ -381,6 +381,17 @@
   - added [PHASE_8_REAL_MISSION_EXECUTION.md](./PHASE_8_REAL_MISSION_EXECUTION.md);
   - updated [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md) to Phase 8;
   - first implementation target is H1 Mission Intake And Session Source Of Truth.
+- Started Phase 8 H1 Mission Intake And Session Source Of Truth:
+  - added a durable `missionState` lifecycle to runtime session snapshots with `draft`, `saved`, `running`, `blocked`, and `delivered` states;
+  - restored old browser/server snapshots by deriving `missionState` when the field is missing;
+  - command edits now update the parsed mission plan and mark the current intake as a local draft;
+  - mission controller, agent runtime, one-step orchestrator advance, and review delivery writes now update lifecycle state through the shared runtime helper;
+  - command dock now shows the mission lifecycle badge alongside server and runtime provider status.
+- Phase 8 H1 lifecycle verification:
+  - `npm run typecheck`, `verify:foundation`, `verify:orchestrator`, `verify:agent-runtime`, `verify:tool-runner`, `verify:git-runner`, `verify:review-packet`, `verify:mission-controller`, `build:web`, and `git diff --check` passed;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed server-connected load, Saved -> Draft lifecycle transition after command edit, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-mission-intake-desktop.png`, `/tmp/team-ai-agent-h1-mission-intake-mobile.png`, and `/tmp/team-ai-agent-h1-mission-intake-mobile-dock.png`.
 - Phase 7 draft pull request connector rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
   - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
   - the Playwright packaged browser binary was missing, so installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
