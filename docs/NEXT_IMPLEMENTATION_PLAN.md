@@ -40,7 +40,8 @@ user mission
 ### Slice H1: Mission Intake And Session Source Of Truth
 
 - current progress: runtime snapshots now include a durable `missionState` lifecycle (`draft`, `saved`, `running`, `blocked`, `delivered`) shared by the web app and orchestrator services;
-- replace remaining static/demo mission defaults with an explicit mission intake flow;
+- current progress: Mission Control now has an inline mission intake panel with dynamic title/command parsing, Save mission, Reset draft, server sync, and local fallback;
+- replace remaining static/demo mission defaults with real persisted mission/run history;
 - persist mission title, command, assumptions, risks, selected autonomy mode, and created timestamp through the orchestrator;
 - keep local recovery if the orchestrator is unavailable;
 - show clear empty, draft, saved, running, blocked, and delivered mission states.

@@ -24,7 +24,8 @@ A user should be able to:
 - Runtime session snapshots now carry a durable `missionState` object with lifecycle status, title, source, reason, created timestamp, and updated timestamp.
 - Command edits in Mission Control update the parsed mission plan and mark the mission as a local draft.
 - The orchestrator, agent runtime, review delivery, and mission controller update mission lifecycle state when they advance, block, or deliver a mission.
-- Add explicit mission creation and saved/draft/running/block/delivered states.
+- Mission Control now includes an inline mission intake panel with dynamic title, command, parsed capability/risk/setup chips, Save mission, Reset draft, server sync, and local fallback.
+- The HUD and HQ panel title now use the persisted mission title instead of the static benchmark title.
 - Persist mission command, title, assumptions, risks, autonomy mode, and timestamps through the orchestrator.
 - Keep local recovery when the orchestrator is unavailable.
 - Make seeded data clearly secondary to real mission state.
@@ -67,4 +68,4 @@ A user should be able to:
 
 - Phase 7 draft PR: `https://github.com/phetjaaeiei/AI-Agent/pull/1`
 - Current branch: `codex/phase-7-remote-mutation-policy`
-- Current implementation target: continue H1 with explicit new mission intake and seeded-data demotion.
+- Current implementation target: continue H1 by persisting assumptions as first-class intake data, then move into H2 mission history and run recovery.

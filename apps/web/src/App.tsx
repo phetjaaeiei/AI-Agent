@@ -1063,6 +1063,7 @@ export function App() {
   const [commandDraft, setCommandDraft] = useState(initialSession.commandDraft);
   const [missionPlan, setMissionPlan] = useState(initialSession.missionPlan);
   const [missionState, setMissionState] = useState(initialSession.missionState);
+  const [lastSavedCommandDraft, setLastSavedCommandDraft] = useState(initialSession.commandDraft);
   const [artifactRecords, setArtifactRecords] = useState<RuntimeArtifactRecord[]>([...initialSession.artifactRecords]);
   const [artifactContents, setArtifactContents] = useState<RuntimeArtifactContent[]>(() => createArtifactContentsFromSession(initialSession));
   const [auditEvents, setAuditEvents] = useState<RuntimeAuditEvent[]>([...initialSession.auditEvents]);
@@ -1070,6 +1071,7 @@ export function App() {
   const [orchestratorStatus, setOrchestratorStatus] = useState<OrchestratorConnectionStatus>("checking");
   const [orchestratorMessage, setOrchestratorMessage] = useState("Checking orchestrator service.");
   const [isAutopilotRunning, setIsAutopilotRunning] = useState(false);
+  const [isMissionSaving, setIsMissionSaving] = useState(false);
   const [agentRuntimeInfo, setAgentRuntimeInfo] = useState<AgentRuntimeInfo>(initialAgentRuntimeInfo);
   const [activeAgentRun, setActiveAgentRun] = useState<AgentRunRecord | undefined>();
   const [agentRunEvents, setAgentRunEvents] = useState<AgentRunEvent[]>([]);
@@ -1091,6 +1093,7 @@ export function App() {
   const activeRoute = workflowRoutes[activeRouteIndex] ?? workflowRoutes[0]!;
   const activeTask = missionTasks[activeRouteIndex] ?? missionTasks[0]!;
   const activeMissionController = missionControllers[0];
+  const missionTitle = missionState.title || missionPlan.title;
 
   const filteredActivity = useMemo(
     () => activityLog.filter((event) => activityFilter === "all" || event.type === activityFilter),
@@ -1100,11 +1103,17 @@ export function App() {
   const roomWorkloads = useMemo(() => calculateRoomWorkloads(taskRuns), [taskRuns]);
   const agentWorkloads = useMemo(() => calculateAgentWorkloads(taskRuns), [taskRuns]);
 
-  function createCurrentRuntimeSession(savedAt: string, nextMissionState: RuntimeMissionState = missionState): RuntimeSessionSnapshot {
+  function createCurrentRuntimeSession(
+    savedAt: string,
+    nextMissionState: RuntimeMissionState = missionState,
+    nextMissionPlan: ReturnType<typeof parseMissionCommand> = missionPlan,
+    nextCommandDraft = commandDraft,
+    nextAuditEvents: readonly RuntimeAuditEvent[] = auditEvents
+  ): RuntimeSessionSnapshot {
     return createRuntimeSessionSnapshot({
       missionId: activeMission.id,
-      commandDraft,
-      missionPlan,
+      commandDraft: nextCommandDraft,
+      missionPlan: nextMissionPlan,
       missionState: nextMissionState,
       runtime: {
         gateRuns,
@@ -1120,7 +1129,7 @@ export function App() {
         selectedArtifactId
       },
       artifactRecords,
-      auditEvents,
+      auditEvents: nextAuditEvents,
       savedAt
     });
   }
@@ -1141,6 +1150,7 @@ export function App() {
     setArtifactRecords([...snapshot.artifactRecords]);
     setAuditEvents([...snapshot.auditEvents]);
     setLastSavedAt(snapshot.savedAt);
+    setLastSavedCommandDraft(snapshot.commandDraft);
   }
 
   useEffect(() => {
@@ -1326,6 +1336,90 @@ export function App() {
         statusReason: "Mission command has local draft edits."
       })
     );
+  }
+
+  async function saveMissionIntake() {
+    if (isMissionSaving || isAutopilotRunning || commandDraft.trim().length === 0) {
+      return;
+    }
+
+    const savedAt = new Date().toISOString();
+    const parsedPlan = parseMissionCommand(commandDraft);
+    const intakeAudit = createRuntimeAuditEvent({
+      id: `audit-mission-intake-${Date.now()}`,
+      actorRoleId: "chief_of_staff",
+      action: "mission_saved",
+      summary: `Mission intake saved for ${parsedPlan.title}.`,
+      severity: "success",
+      entityId: activeMission.id,
+      createdAt: savedAt
+    });
+    const nextAuditEvents = [intakeAudit, ...auditEvents].slice(0, 200);
+    const orchestratorMissionState = createRuntimeMissionState({
+      commandDraft,
+      missionPlan: parsedPlan,
+      savedAt,
+      previousState: missionState,
+      source: "orchestrator",
+      status: "saved",
+      statusReason: "Mission intake saved to the orchestrator."
+    });
+    const syncSnapshot = createCurrentRuntimeSession(savedAt, orchestratorMissionState, parsedPlan, commandDraft, nextAuditEvents);
+
+    setIsMissionSaving(true);
+    setMissionPlan(parsedPlan);
+    setMissionState(orchestratorMissionState);
+    setAuditEvents(nextAuditEvents);
+    setOrchestratorStatus("syncing");
+    setOrchestratorMessage("Saving mission intake to the orchestrator.");
+
+    try {
+      const snapshot = await saveOrchestratorSession(syncSnapshot, syncSnapshot);
+      applyRuntimeSessionSnapshot(snapshot);
+      setOrchestratorStatus("connected");
+      setOrchestratorMessage("Mission intake saved to the orchestrator.");
+    } catch (error) {
+      const localMissionState = createRuntimeMissionState({
+        commandDraft,
+        missionPlan: parsedPlan,
+        savedAt,
+        previousState: missionState,
+        source: "local",
+        status: "saved",
+        statusReason: "Mission intake saved in browser memory because the orchestrator is unavailable."
+      });
+      const localSnapshot = createCurrentRuntimeSession(savedAt, localMissionState, parsedPlan, commandDraft, nextAuditEvents);
+
+      setMissionState(localMissionState);
+      saveRuntimeSession(localSnapshot);
+      setLastSavedAt(savedAt);
+      setLastSavedCommandDraft(commandDraft);
+      setOrchestratorStatus("local");
+      setOrchestratorMessage(`Saved locally: ${formatOrchestratorError(error)}`);
+    } finally {
+      setIsMissionSaving(false);
+    }
+  }
+
+  function resetMissionDraft() {
+    const restoredCommand = lastSavedCommandDraft.trim() ? lastSavedCommandDraft : DEFAULT_MISSION_COMMAND;
+    const restoredPlan = parseMissionCommand(restoredCommand);
+    const resetAt = new Date().toISOString();
+
+    setCommandDraft(restoredCommand);
+    setMissionPlan(restoredPlan);
+    setMissionState((current) =>
+      createRuntimeMissionState({
+        commandDraft: restoredCommand,
+        missionPlan: restoredPlan,
+        savedAt: resetAt,
+        previousState: current,
+        source: current.source,
+        status: "saved",
+        statusReason: "Draft reset to the last saved mission intake."
+      })
+    );
+    setOrchestratorMessage("Draft reset to the last saved mission intake.");
   }
 
   function selectRole(role: ActiveRole) {
@@ -1798,13 +1892,25 @@ export function App() {
     <div className="app-shell">
       <LeftNav />
       <main className="workspace">
-        <TopHud />
+        <TopHud missionPlan={missionPlan} missionTitle={missionTitle} />
+        <MissionIntakePanel
+          commandDraft={commandDraft}
+          isAutopilotRunning={isAutopilotRunning}
+          isSaving={isMissionSaving}
+          lastSavedAt={lastSavedAt}
+          lastSavedCommandDraft={lastSavedCommandDraft}
+          missionPlan={missionPlan}
+          missionState={missionState}
+          onCommandChange={updateCommandDraft}
+          onResetDraft={resetMissionDraft}
+          onSaveMission={saveMissionIntake}
+        />
         <section className="main-grid" aria-label="HQ and Mission Control">
           <section className="war-room-panel">
             <div className="panel-heading">
               <div>
                 <h1>Team AI Agent HQ</h1>
-                <p>{activeMission.title}</p>
+                <p>{missionTitle}</p>
               </div>
               <div className="accuracy-badge" aria-label={`Accuracy score ${accuracy.overall}`}>
                 <CheckCircle2 size={16} />
@@ -1880,12 +1986,10 @@ export function App() {
           activityFilter={activityFilter}
           artifactRecordCount={artifactRecords.length}
           auditEventCount={auditEvents.length}
-          commandDraft={commandDraft}
           events={filteredActivity}
           isAutopilotRunning={isAutopilotRunning}
           lastSavedAt={lastSavedAt}
           onFilterChange={setActivityFilter}
-          onCommandChange={updateCommandDraft}
           onRunAutopilot={runAutopilotStep}
           missionPlan={missionPlan}
           missionState={missionState}
@@ -1926,24 +2030,134 @@ function LeftNav() {
   );
 }
 
-function TopHud() {
+function missionRiskLabel(missionPlan: ReturnType<typeof parseMissionCommand>): string {
+  if (missionPlan.risks.some((risk) => risk.level === "high")) return "High";
+  if (missionPlan.risks.some((risk) => risk.level === "medium")) return "Medium";
+  return "Low";
+}
+
+function missionAutonomyLabel(mode: ReturnType<typeof parseMissionCommand>["autonomyMode"]): string {
+  if (mode === "needs_setup") return "Needs setup";
+  if (mode === "review_first") return "Review first";
+  return "Autopilot";
+}
+
+function TopHud({
+  missionPlan,
+  missionTitle
+}: {
+  missionPlan: ReturnType<typeof parseMissionCommand>;
+  missionTitle: string;
+}) {
   return (
     <header className="top-hud">
       <div className="mission-id">
         <span>Mission</span>
-        <strong>{activeMission.title}</strong>
+        <strong>{missionTitle}</strong>
       </div>
       <div className="hud-metrics" aria-label="Mission metrics">
-        <HudMetric icon={Zap} label="Autopilot" value="Full" tone="blue" />
-        <HudMetric icon={UsersRound} label="Agents" value="10 active" tone="green" />
-        <HudMetric icon={AlertTriangle} label="Risk" value="Medium" tone="amber" />
-        <HudMetric icon={Activity} label="Cost" value="$18.40" tone="neutral" />
+        <HudMetric icon={Zap} label="Mode" value={missionAutonomyLabel(missionPlan.autonomyMode)} tone="blue" />
+        <HudMetric icon={UsersRound} label="Roles" value={`${missionPlan.recommendedRoleIds.length} mapped`} tone="green" />
+        <HudMetric icon={AlertTriangle} label="Risk" value={missionRiskLabel(missionPlan)} tone={missionRiskLabel(missionPlan) === "Low" ? "green" : "amber"} />
+        <HudMetric icon={Activity} label="Confidence" value={`${missionPlan.confidence}%`} tone="neutral" />
       </div>
       <button className="search-button" type="button">
         <Search size={16} />
         Search commands
       </button>
     </header>
+  );
+}
+
+function MissionIntakePanel({
+  commandDraft,
+  isAutopilotRunning,
+  isSaving,
+  lastSavedAt,
+  lastSavedCommandDraft,
+  missionPlan,
+  missionState,
+  onCommandChange,
+  onResetDraft,
+  onSaveMission
+}: {
+  commandDraft: string;
+  isAutopilotRunning: boolean;
+  isSaving: boolean;
+  lastSavedAt: string;
+  lastSavedCommandDraft: string;
+  missionPlan: ReturnType<typeof parseMissionCommand>;
+  missionState: RuntimeMissionState;
+  onCommandChange: (value: string) => void;
+  onResetDraft: () => void;
+  onSaveMission: () => void | Promise<void>;
+}) {
+  const hasCommand = commandDraft.trim().length > 0;
+  const hasDraftChanges = commandDraft !== lastSavedCommandDraft || missionState.status === "draft";
+  const capabilityLabels = missionPlan.detectedCapabilities.slice(0, 4).map((capability) => capability.label);
+  const riskLabels = missionPlan.risks.length > 0
+    ? missionPlan.risks.slice(0, 3).map((risk) => `${risk.label} (${risk.level})`)
+    : ["No high-risk signals"];
+  const missingInputLabels = missionPlan.missingInputs.length > 0
+    ? missionPlan.missingInputs.slice(0, 3)
+    : ["Ready to run"];
+
+  return (
+    <section className="mission-intake-panel" aria-label="Mission intake">
+      <form
+        className="mission-intake-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSaveMission();
+        }}
+      >
+        <div className="mission-intake-copy">
+          <div className="mission-intake-heading">
+            <div>
+              <span>Mission intake</span>
+              <h2>{missionState.title}</h2>
+            </div>
+            <span className={`mission-state status-${missionState.status}`} title={missionState.statusReason}>
+              {missionStateLabel[missionState.status]}
+            </span>
+          </div>
+          <label className="mission-command-field">
+            <span>Command</span>
+            <textarea
+              aria-label="Mission intake command"
+              onChange={(event) => onCommandChange(event.target.value)}
+              placeholder="Describe the next mission for the AI company"
+              rows={3}
+              spellCheck="false"
+              value={commandDraft}
+            />
+          </label>
+          <div className="mission-intake-chips" aria-label="Parsed mission intake">
+            {[...capabilityLabels, ...riskLabels, ...missingInputLabels].slice(0, 8).map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+        </div>
+        <div className="mission-intake-controls">
+          <div className="mission-intake-stats" aria-label="Mission intake status">
+            <span>{missionAutonomyLabel(missionPlan.autonomyMode)}</span>
+            <span>{missionPlan.confidence}% confidence</span>
+            <span>Saved {formatSavedAt(lastSavedAt)}</span>
+            <span>{missionPlan.recommendedRoleIds.length} roles</span>
+          </div>
+          <div className="mission-intake-actions">
+            <button disabled={isSaving || isAutopilotRunning || !hasDraftChanges} onClick={onResetDraft} type="button">
+              <RotateCcw size={15} />
+              Reset draft
+            </button>
+            <button className="is-primary" disabled={isSaving || isAutopilotRunning || !hasCommand || !hasDraftChanges} type="submit">
+              <ClipboardCheck size={15} />
+              {isSaving ? "Saving" : "Save mission"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -3090,12 +3304,10 @@ function BottomDock({
   activityFilter,
   artifactRecordCount,
   auditEventCount,
-  commandDraft,
   isAutopilotRunning,
   lastSavedAt,
   missionPlan,
   missionState,
-  onCommandChange,
   onFilterChange,
   onRunAutopilot,
   orchestratorMessage,
@@ -3106,12 +3318,10 @@ function BottomDock({
   activityFilter: ActivityFilter;
   artifactRecordCount: number;
   auditEventCount: number;
-  commandDraft: string;
   isAutopilotRunning: boolean;
   lastSavedAt: string;
   missionPlan: ReturnType<typeof parseMissionCommand>;
   missionState: RuntimeMissionState;
-  onCommandChange: (value: string) => void;
   onFilterChange: (filter: ActivityFilter) => void;
   onRunAutopilot: () => void | Promise<void>;
   orchestratorMessage: string;
@@ -3127,16 +3337,11 @@ function BottomDock({
           void onRunAutopilot();
         }}
       >
-        <label className="command-input">
+        <div className="command-input execution-summary">
           <Sparkles size={18} />
-          <span>สั่งงานบริษัท AI</span>
-          <textarea
-            aria-label="Mission command"
-            value={commandDraft}
-            onChange={(event) => onCommandChange(event.target.value)}
-            rows={2}
-            spellCheck="false"
-          />
+          <span>Mission run</span>
+          <strong>{missionPlan.title}</strong>
+          <p>{missionPlan.summary}</p>
           <div className="command-meta" aria-label="Mission session memory status">
             <span className={`command-status status-${orchestratorStatus}`} title={orchestratorMessage}>
               {orchestratorStatusLabel[orchestratorStatus]}
@@ -3153,7 +3358,7 @@ function BottomDock({
             <span>{artifactRecordCount} artifacts</span>
             <span>{auditEventCount} audit events</span>
           </div>
-        </label>
+        </div>
         <button disabled={isAutopilotRunning} type="submit">
           <Play size={16} />
           {isAutopilotRunning ? "Mission running" : "Run local agents"}

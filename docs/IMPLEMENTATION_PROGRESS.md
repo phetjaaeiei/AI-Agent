@@ -392,6 +392,17 @@
   - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
   - rendered QA at `1440x900` and `390x844` confirmed server-connected load, Saved -> Draft lifecycle transition after command edit, no console errors, no failed requests, and no horizontal overflow;
   - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-mission-intake-desktop.png`, `/tmp/team-ai-agent-h1-mission-intake-mobile.png`, and `/tmp/team-ai-agent-h1-mission-intake-mobile-dock.png`.
+- Extended Phase 8 H1 Mission Intake:
+  - added an inline mission intake panel above Mission Control with editable mission command, parsed capability/risk/setup chips, Save mission, and Reset draft;
+  - Save mission writes the current runtime session through `PUT /api/mission/session` and falls back to browser memory when the orchestrator is unavailable;
+  - save actions add a `mission_saved` audit event and update the last saved command used by Reset draft;
+  - top HUD and HQ subtitle now use the persisted mission title and parsed mission metrics instead of static benchmark labels;
+  - bottom dock now acts as a mission execution summary and activity feed rather than a duplicate command editor.
+- Phase 8 H1 inline intake verification:
+  - `npm run typecheck`, `npm run verify:orchestrator`, `npm run build:web`, and `git diff --check` passed;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed initial Saved state, edit -> Draft, Save mission -> Saved, Save/Reset disabled after save, reload persistence, Reset draft restoring the last saved command, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-intake-save-desktop.png` and `/tmp/team-ai-agent-h1-intake-save-mobile.png`.
 - Phase 7 draft pull request connector rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
   - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
   - the Playwright packaged browser binary was missing, so installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
