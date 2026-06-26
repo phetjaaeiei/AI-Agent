@@ -17,6 +17,7 @@ import { gitOperationKindLabel, gitOperationSummary, toolCallKindLabel } from ".
 import { getShortRoleName } from "../../utils/role-labels.js";
 import { formatHistoryTimestamp } from "../../utils/time-format.js";
 import { missionImplementationPreview } from "../../generated/mission-implementation-preview.js";
+import { implementationSurfaceModules } from "../../utils/implementation-surfaces.js";
 import { AutomationDecisionSummary } from "./AutomationDecisionSummary.js";
 import { ImplementationPreviewCard } from "./ImplementationPreviewCard.js";
 import { RemoteHandoffExecutionCard } from "./RemoteHandoffExecutionCard.js";
@@ -84,7 +85,11 @@ export function MissionRecoveryInspector({ history }: { history: MissionHistoryR
             {controller.automationDecisions?.length ? (
               <AutomationDecisionSummary decisions={controller.automationDecisions} title="Recovered handoff decisions" />
             ) : null}
-            <ImplementationPreviewCard patchContent={implementationPatchContent} preview={missionImplementationPreview} />
+            <ImplementationPreviewCard
+              patchContent={implementationPatchContent}
+              preview={missionImplementationPreview}
+              surfaceModules={implementationSurfaceModules}
+            />
             <RemoteHandoffExecutionCard
               auditEvents={history.session.auditEvents}
               gitOperations={history.gitOperations}

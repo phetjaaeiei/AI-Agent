@@ -1,15 +1,19 @@
 import { Code2 } from "lucide-react";
 import type { RuntimeArtifactContent } from "../../../../../packages/workflow/src/index.js";
 import type { MissionImplementationPreview, MissionImplementationPreviewSurface } from "../../generated/mission-implementation-preview.js";
+import { findImplementationSurfaceModule } from "../../utils/implementation-surfaces.js";
+import type { ImplementationSurfaceModule } from "../../utils/implementation-surfaces.js";
 
 export function ImplementationPreviewCard({
   patchContent,
-  preview
+  preview,
+  surfaceModules = []
 }: {
   patchContent: RuntimeArtifactContent | undefined;
   preview: MissionImplementationPreview;
+  surfaceModules?: readonly ImplementationSurfaceModule[];
 }) {
-  const display = createDisplayPreview(preview, patchContent);
+  const display = createDisplayPreview(preview, patchContent, surfaceModules);
 
   return (
     <section className="implementation-preview-card" aria-label="Implementation preview">
@@ -63,7 +67,11 @@ export function ImplementationPreviewCard({
   );
 }
 
-function createDisplayPreview(preview: MissionImplementationPreview, patchContent: RuntimeArtifactContent | undefined) {
+function createDisplayPreview(
+  preview: MissionImplementationPreview,
+  patchContent: RuntimeArtifactContent | undefined,
+  surfaceModules: readonly ImplementationSurfaceModule[]
+) {
   if (!patchContent) {
     return {
       command: preview.command,
@@ -79,6 +87,10 @@ function createDisplayPreview(preview: MissionImplementationPreview, patchConten
   }
 
   const targetPath = patchContent.sections[0]?.evidence.find((item) => item.startsWith("Target: "))?.replace("Target: ", "") ?? patchContent.artifactId;
+  const surfaceModule = findImplementationSurfaceModule(
+    surfaceModules,
+    targetPath.includes("/implementation-surfaces/") ? targetPath : preview.surfaceModulePath
+  );
 
   return {
     command: patchContent.artifactId,
@@ -90,7 +102,7 @@ function createDisplayPreview(preview: MissionImplementationPreview, patchConten
     })),
     status: "generated",
     summary: patchContent.summary,
-    surface: createArtifactSurface(patchContent, targetPath),
+    surface: surfaceModule?.surface ?? createArtifactSurface(patchContent, targetPath),
     targetPath,
     title: patchContent.title
   };

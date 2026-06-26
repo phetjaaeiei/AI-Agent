@@ -87,4 +87,5 @@ Phase 10 P10.1 routes the autonomous controller's first implementation patch thr
 - evidence: `Local Code Patch` artifact with bounded patch summary;
 - failure behavior: the controller stops at `implementation_patch` with `implementation_failed`;
 - P10.3 policy: `phase10-targeted-patch-v1` preflights exact paths, TypeScript file type, target count, owner-role hints, denied fragments, and byte limits before `file_write`;
+- Phase 11 P11.1: Mission Control can hydrate the rendered preview from the static generated surface module whose target path matches the latest `Local Code Patch` artifact;
 - future expansion: additional patch targets require a dedicated allowlist or policy before becoming automatic.

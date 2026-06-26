@@ -1066,7 +1066,39 @@
   - `npm run build:web`;
   - `git diff --check`.
 
+### Phase 11 Implementation Surface Hydration
+
+- Started Phase 11 with P11.1 surface module hydration:
+  - added `apps/web/src/utils/implementation-surfaces.ts` as a static registry for the three allowlisted generated surface modules;
+  - `ImplementationPreviewCard` now accepts optional surface modules and resolves a module by exact target path when a `Local Code Patch` artifact points to `apps/web/src/generated/implementation-surfaces/*-surface.ts`;
+  - live Mission Control and recovered mission inspectors pass the same registry into the card;
+  - fallback rendering from patch artifact content remains available when no matching module exists.
+- Preserved the safety boundary:
+  - no arbitrary dynamic import was added;
+  - no browser workspace file read was added;
+  - no shell, remote Git, deploy, merge, force-push, branch deletion, destructive Git, secret serialization, model mutation, or unbounded loop behavior was added.
+- Extended rendered verification:
+  - rendered QA now asserts the generated preview renders the dashboard surface module path output instead of the generic patch-artifact fallback.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run build:web`.
+- Full Phase 11 P11.1 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Continue with the next implementation phase after the Phase 10 full verification sweep.
+- Continue Phase 11 with surface module contract hardening.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

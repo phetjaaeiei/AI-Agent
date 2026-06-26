@@ -705,11 +705,11 @@ async function assertImplementationPreviewGenerated(rootLocator, label) {
   await card.getByText("generated", { exact: true }).waitFor({ timeout: 10_000 });
   await card.getByText("Local Code Patch").waitFor({ timeout: 10_000 });
   await card.getByLabel("Rendered implementation preview").waitFor({ timeout: 10_000 });
-  await card.getByText("Local patch preview is ready").waitFor({ timeout: 10_000 });
-  await card.getByText("Recovery", { exact: true }).waitFor({ timeout: 10_000 });
+  await card.getByText("Dashboard surface waiting").waitFor({ timeout: 10_000 });
+  await card.getByText("Data", { exact: true }).waitFor({ timeout: 10_000 });
   await card.locator(".implementation-preview-facts strong").filter({ hasText: "apps/web/src/generated/implementation-surfaces/" }).first().waitFor({ timeout: 10_000 });
   assert(await card.locator(".implementation-preview-sections article").count() >= 2, `${label} should render generated implementation preview sections.`);
-  assert(await card.locator(".implementation-preview-surface-panels article").count() >= 3, `${label} should render generated implementation preview surface panels.`);
+  assert(await card.locator(".implementation-preview-surface-panels article").count() >= 2, `${label} should render generated implementation preview surface panels.`);
 }
 
 async function assertSkippedRemoteHandoffExecution(rootLocator, label) {

@@ -135,6 +135,7 @@ import { HardeningGuidanceList } from "./components/primitives/HardeningGuidance
 import type { HardeningGuidance } from "./components/primitives/HardeningGuidanceList.js";
 import { missionImplementationPreview } from "./generated/mission-implementation-preview.js";
 import { isRealArtifactContent, isSeededArtifactContent } from "./utils/artifact-content.js";
+import { implementationSurfaceModules } from "./utils/implementation-surfaces.js";
 import { missionStateLabel } from "./utils/mission-labels.js";
 import { gitOperationKindLabel, gitOperationSummary, toolCallKindLabel } from "./utils/operation-labels.js";
 import { createRemoteHandoffSignalSummary } from "./utils/remote-handoff.js";
@@ -2961,7 +2962,11 @@ function MissionInspector({
         onCancel={onCancelMissionController}
         onRetry={onRetryMissionController}
       />
-      <ImplementationPreviewCard patchContent={implementationPatchContent} preview={missionImplementationPreview} />
+      <ImplementationPreviewCard
+        patchContent={implementationPatchContent}
+        preview={missionImplementationPreview}
+        surfaceModules={implementationSurfaceModules}
+      />
       <RemoteHandoffExecutionCard
         auditEvents={auditEvents}
         gitOperations={gitOperations}

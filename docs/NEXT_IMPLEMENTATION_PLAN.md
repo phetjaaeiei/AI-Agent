@@ -1,10 +1,10 @@
-# Next Implementation Plan: Phase 10 Implementation Patch Loop
+# Next Implementation Plan: Phase 11 Implementation Surface Hydration
 
-Status: Phase 10 complete through P10.4 human approval and remote handoff link
+Status: Phase 11 complete through P11.1 allowlisted surface module hydration
 
 ## 1. Current Position
 
-Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage, a rendered preview pipeline, targeted patch expansion, and reviewed draft-PR handoff evidence before any remote mutation can consume implementation output.
+Phase 8 Real Mission Execution, Phase 9 Guarded Automation, and Phase 10 Implementation Patch Loop are complete. Phase 11 now connects the generated implementation surface modules back into Mission Control so the preview can render from the same allowlisted module path that the controller wrote as patch evidence.
 
 - Repository: `phetjaaeiei/AI-Agent`
 - Branch: `codex/phase-7-remote-mutation-policy`
@@ -12,7 +12,7 @@ Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phas
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, policy-controlled targeted local implementation patches, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, reviewed draft-PR evidence hydration, and read-only recovery of previous mission runs.
+The app can now run local-first agent planning, policy-controlled targeted local implementation patches, rendered implementation preview, allowlisted surface module hydration, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, reviewed draft-PR evidence hydration, and read-only recovery of previous mission runs.
 
 The next target is not "let the agent rewrite anything." The target is a visible, bounded implementation loop:
 
@@ -28,7 +28,51 @@ mission command
   -> guarded handoff policy
 ```
 
-## 2. Phase 10 Goal
+## 2. Phase 11 Goal
+
+Make generated implementation surface modules a first-class preview source without loosening write policy:
+
+```txt
+implementation patch artifact
+  -> target path
+  -> allowlisted generated surface module
+  -> Mission Control rendered preview
+  -> recovery preview
+```
+
+The phase should keep the current safety model:
+
+- generated modules are imported through a small frontend utility;
+- the card selects a module only by exact allowlisted target path;
+- patch artifact fallback remains available;
+- no arbitrary dynamic import or workspace file read is added to the browser.
+
+## 3. Phase 11 Delivery Slices
+
+### Slice P11.1: Surface Module Hydration
+
+- complete: added a frontend `implementation-surfaces` utility that imports the three allowlisted generated surface modules and resolves them by target path;
+- complete: `ImplementationPreviewCard` accepts optional surface modules and uses the matching module when a `Local Code Patch` artifact points to an implementation surface target;
+- complete: live Mission Control and recovered mission inspectors pass the same surface module registry into the preview card;
+- complete: rendered QA now asserts generated preview output comes from the dashboard surface module path instead of the generic artifact fallback;
+- complete: no remote, shell, Git, deploy, merge, or dynamic browser file-read behavior was added.
+
+### Slice P11.2: Surface Module Contract Hardening
+
+- pending: move repeated generated surface module types into a shared frontend type helper if the generated module format grows;
+- pending: add focused parser or contract checks for surface module target selection without relying only on rendered QA;
+- pending: consider surfacing the module source label in Mission Control if it helps users distinguish manifest, surface module, and archived patch fallbacks.
+
+## 4. Operating Rules
+
+- Use local Ollama by default for live agent execution.
+- Keep deterministic fallback visible and testable.
+- Keep arbitrary shell, secret reads, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops hard-disabled.
+- Keep merge and production deploy manual-only until a dedicated connector policy, approval model, rollback/canary behavior, and audit trail exist.
+- Keep implementation writes routed through explicit local policy and visible patch artifacts.
+- Preserve all durable project memory in the AI-Agent Obsidian vault after substantive work.
+
+## 5. Phase 10 Completed Baseline
 
 Turn mission commands into local, reviewable code patches without bypassing the existing tool-runner, Git-runner, review, CI, delivery, or automation-policy layers:
 
@@ -41,18 +85,7 @@ implementation request
   -> manual or guarded remote handoff
 ```
 
-## 3. Operating Rules
-
-- Use local Ollama by default for live agent execution.
-- Keep deterministic fallback visible and testable.
-- Keep arbitrary shell, secret reads, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops hard-disabled.
-- Keep merge and production deploy manual-only until a dedicated connector policy, approval model, rollback/canary behavior, and audit trail exist.
-- Allow staging deploy, remote branch push, and draft PR creation to become bounded-auto only after explicit connector policy and required evidence are present.
-- Keep GitHub behavior draft-PR and remote-evidence oriented until merge/release policy exists.
-- Keep implementation writes routed through the tool-runner `file_write` policy until a narrower code-generation policy is defined.
-- Preserve all durable project memory in the AI-Agent Obsidian vault after substantive work.
-
-## 4. Delivery Slices
+## 6. Phase 10 Delivery Slices
 
 ### Slice P10.1: Bounded Implementation Patch Stage
 
@@ -86,7 +119,7 @@ implementation request
 - complete: draft PR body hydration now includes delivery Markdown plus implementation patch targets, rendered preview target evidence, CI command results, reviewer decisions, delivery artifact ids, and remote safety notes;
 - complete: automatic merge and production deployment remain manual-only, with force push, branch deletion, destructive Git, and deploy actions still disabled by the guarded automation policy.
 
-## 5. Phase 9 Completed Baseline
+## 7. Phase 9 Completed Baseline
 
 Phase 9 is complete. The shipped baseline includes:
 
@@ -99,7 +132,7 @@ Phase 9 is complete. The shipped baseline includes:
 - default skipped handoff, policy-enabled completed handoff, blocked handoff, and failed handoff rendered QA fixtures;
 - continued hard-disable/manual-only boundaries for merge, production deploy, force push, branch deletion, destructive Git, secret serialization, silent fine-tuning, and unbounded loops.
 
-## 6. Phase 8 Completed Slices
+## 8. Phase 8 Completed Slices
 
 ### Slice H1: Mission Intake And Session Source Of Truth
 
@@ -148,7 +181,7 @@ Phase 9 is complete. The shipped baseline includes:
 - complete: kept UI state tied to live runtime, evidence, and Git/review policy rather than introducing static showcase-only content;
 - complete: rendered desktop/mobile QA and Phase 8 verification sweeps passed after the folder organization.
 
-## 7. Still Not Automatic
+## 9. Still Not Automatic
 
 - automatic merge;
 - production release;
@@ -160,7 +193,7 @@ Phase 9 is complete. The shipped baseline includes:
 - silent fine-tuning or model mutation without a visible local policy;
 - unbounded autonomous loops.
 
-## 8. Required Verification
+## 10. Required Verification
 
 - `npm run verify:automation-policy`;
 - `npm run typecheck`;
@@ -176,8 +209,8 @@ Phase 9 is complete. The shipped baseline includes:
 - `npm run build:web`;
 - rendered QA for desktop and mobile mission intake/recovery/delivery flows.
 
-## 9. Next
+## 11. Next
 
-- Continue Phase 10 with P10.4 human approval and remote handoff link.
+- Continue Phase 11 with P11.2 surface module contract hardening.
 - Keep implementation writes routed through explicit local policy and visible patch artifacts.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

@@ -46,6 +46,8 @@ Phase 10 P10.2 adds a rendered preview surface to that module. Mission Control c
 
 Phase 10 P10.3 adds a targeted patch policy before file writes. The controller can write only the preview manifest plus one generated surface module selected from the mission command (`landing`, `dashboard`, or `workflow`). Every target is preflighted against `phase10-targeted-patch-v1` before the generic tool-runner `file_write` policy runs.
 
+Phase 11 P11.1 makes those generated surface modules a first-class Mission Control preview source. The web app imports the three allowlisted generated modules through a static registry and the preview card resolves the module by exact patch target path. If no matching module exists, the card keeps the archived patch-artifact fallback. This adds no arbitrary browser file reads or dynamic workspace imports.
+
 ## Local Reviewers
 
 Tech Lead, QA Lead, and Lead BA reviewers run independently. Ollama uses structured JSON output when available; deterministic fallback evaluates the same persisted completeness requirements.
