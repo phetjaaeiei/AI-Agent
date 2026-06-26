@@ -6,7 +6,9 @@ Date: 2026-06-26
 
 Phase 10 turns the autonomous controller from an evidence collector into a local implementation loop. The controller can now create a bounded local code patch before Git evidence, review packets, CI evidence, reviewer decisions, delivery reports, and guarded handoff policy run.
 
-## Current Slice: P10.1
+## Completed Slices
+
+### P10.1: Bounded Implementation Patch Stage
 
 P10.1 is intentionally narrow:
 
@@ -18,6 +20,16 @@ P10.1 is intentionally narrow:
 - recovery: live and archived controller views show the `implementation_patch` stage.
 
 For a command such as "create a landing page for this web app", the current controller writes generated landing-page preview content into the generated module. Mission Control then displays that patch as implementation evidence. It does not yet rewrite arbitrary application routes or components.
+
+### P10.2: Rendered Preview Pipeline
+
+P10.2 makes the generated patch visible as a rendered preview:
+
+- generated preview modules include `MissionImplementationPreviewSurface`;
+- the controller chooses landing, dashboard, or workflow preview variants from the mission command;
+- Mission Control renders a preview canvas from generated module data before a mission and from `Local Code Patch` artifact data after a mission;
+- recovered mission archives render the same preview canvas from archived artifact contents without replaying controller work;
+- rendered QA asserts waiting, generated, and recovered preview surfaces on desktop and mobile.
 
 ## Safety Boundary
 
@@ -58,8 +70,9 @@ The full sweep passed on 2026-06-26:
 - `npm run build:web`;
 - `git diff --check`.
 
+P10.2 reused the same full sweep on 2026-06-26 and added focused assertions for generated surface types, dashboard/workflow variants, desktop/mobile rendered preview canvas states, and recovered preview surfaces.
+
 ## Next Slices
 
-- P10.2: turn the generated implementation preview into a richer rendered preview pipeline.
 - P10.3: define a narrow patch-generation policy for safe repo-local edits beyond the generated module.
 - P10.4: feed implementation patch, preview, CI, review, and delivery evidence into guarded remote handoff and draft PR content.

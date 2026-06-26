@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -64,6 +64,9 @@ try {
   assert(completed.automationDecisions?.some((decision) => decision.kind === "force_push" && decision.disabled), "Complete controller should persist hard-disabled force push decision.");
   const completeToolCalls = await completeStack.toolCallStore.listToolCalls(missionId);
   assert(completeToolCalls.some((call) => call.kind === "file_write" && call.status === "completed" && call.artifactContentId), "Complete controller should create a local implementation patch artifact.");
+  const generatedPreview = await readFile(join(workspace, "apps/web/src/generated/mission-implementation-preview.ts"), "utf8");
+  assert(generatedPreview.includes("MissionImplementationPreviewSurface"), "Complete controller should write rendered preview surface types.");
+  assert(generatedPreview.includes("\"Workflow preview\""), "Generic controller mission should write a workflow rendered preview surface.");
   const completeGitOperations = await completeStack.gitOperationStore.listOperations(missionId);
   assert(["remote_evidence", "branch_push_policy", "draft_pr_policy"].every((kind) => completeGitOperations.some((operation) => operation.kind === kind)), "Complete controller should collect read-only handoff policy Git evidence.");
   assert(completeGitOperations.every((operation) => !["local_commit", "branch_push", "draft_pr_create"].includes(operation.kind)), "Complete controller should not commit, push, or create PRs.");

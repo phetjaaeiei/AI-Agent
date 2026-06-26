@@ -1,10 +1,10 @@
 # Next Implementation Plan: Phase 10 Implementation Patch Loop
 
-Status: Phase 10 complete through P10.1 bounded local implementation patch
+Status: Phase 10 complete through P10.2 rendered preview pipeline
 
 ## 1. Current Position
 
-Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has started by giving the autonomous controller a bounded local implementation-patch stage before evidence, review, CI, delivery, and handoff policy.
+Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage and a rendered preview pipeline before evidence, review, CI, delivery, and handoff policy.
 
 - Repository: `phetjaaeiei/AI-Agent`
 - Branch: `codex/phase-7-remote-mutation-policy`
@@ -12,7 +12,7 @@ Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phas
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, a policy-controlled local implementation patch, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
+The app can now run local-first agent planning, a policy-controlled local implementation patch, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
 
 The next target is not "let the agent rewrite anything." The target is a visible, bounded implementation loop:
 
@@ -65,9 +65,11 @@ implementation request
 
 ### Slice P10.2: Rendered Preview Pipeline
 
-- pending: turn generated implementation preview content into a richer rendered preview area for actual mission-requested app surfaces;
-- pending: capture desktop/mobile rendered evidence for the generated surface before delivery;
-- pending: keep preview state recoverable from mission history without replaying the write.
+- complete: generated implementation preview modules now include a typed rendered `surface` model with landing, dashboard, and workflow variants;
+- complete: Mission Control renders a preview canvas inside the `Implementation Preview` card from either seed/generated data or the latest `Local Code Patch` artifact;
+- complete: recovered mission archives render the same preview canvas from archived patch artifacts without replaying the controller write;
+- complete: deterministic verification asserts generated surface types and dashboard/workflow variants;
+- complete: rendered QA asserts waiting, generated, and recovered implementation preview surfaces on desktop and mobile.
 
 ### Slice P10.3: Targeted Patch Expansion
 
@@ -173,6 +175,6 @@ Phase 9 is complete. The shipped baseline includes:
 
 ## 9. Next
 
-- Continue Phase 10 with P10.2 rendered preview pipeline and P10.3 targeted patch expansion.
+- Continue Phase 10 with P10.3 targeted patch expansion.
 - Keep implementation writes routed through explicit local policy and visible patch artifacts.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

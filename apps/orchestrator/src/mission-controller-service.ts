@@ -764,6 +764,7 @@ function isTerminal(status: MissionControllerRecord["status"]): boolean {
 function createImplementationPreviewSource(command: string, generatedAt: string): string {
   const normalizedCommand = command.trim().replace(/\s+/g, " ");
   const isLandingPage = /\b(landing|homepage|marketing|hero|webapp|launch)\b/i.test(normalizedCommand);
+  const isDashboard = /\b(dashboard|report|inventory|analytics|table|insight)\b/i.test(normalizedCommand);
   const title = isLandingPage ? "Team AI Agent Landing Page" : "Mission Implementation Preview";
   const summary = isLandingPage
     ? "Generated landing-page preview content for the Team AI Agent web app, ready for review and rendered QA wiring."
@@ -797,6 +798,12 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
         summary: "Keep the change local and reviewable; remote push, PR creation, merge, and deploy stay behind policy gates."
       }
     ];
+  const surface = createImplementationPreviewSurface({
+    command: normalizedCommand,
+    isDashboard,
+    isLandingPage,
+    title
+  });
   const preview = {
     schemaVersion: 1,
     generatedAt,
@@ -805,6 +812,7 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
     title,
     summary,
     targetPath: IMPLEMENTATION_PREVIEW_PATH,
+    surface,
     sections
   };
 
@@ -812,6 +820,22 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
     "export type MissionImplementationPreviewSection = {",
     "  label: string;",
     "  summary: string;",
+    "};",
+    "",
+    "export type MissionImplementationPreviewSurfacePanel = {",
+    "  label: string;",
+    "  detail: string;",
+    "  tone: \"primary\" | \"neutral\" | \"success\";",
+    "};",
+    "",
+    "export type MissionImplementationPreviewSurface = {",
+    "  kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "  eyebrow: string;",
+    "  headline: string;",
+    "  subheadline: string;",
+    "  primaryAction: string;",
+    "  secondaryAction: string;",
+    "  panels: readonly MissionImplementationPreviewSurfacePanel[];",
     "};",
     "",
     "export type MissionImplementationPreview = {",
@@ -822,12 +846,107 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
     "  title: string;",
     "  summary: string;",
     "  targetPath: string;",
+    "  surface: MissionImplementationPreviewSurface;",
     "  sections: readonly MissionImplementationPreviewSection[];",
     "};",
     "",
     `export const missionImplementationPreview: MissionImplementationPreview = ${JSON.stringify(preview, null, 2)};`,
     ""
   ].join("\n");
+}
+
+function createImplementationPreviewSurface({
+  command,
+  isDashboard,
+  isLandingPage,
+  title
+}: {
+  command: string;
+  isDashboard: boolean;
+  isLandingPage: boolean;
+  title: string;
+}) {
+  if (isLandingPage) {
+    return {
+      kind: "landing" as const,
+      eyebrow: "Landing preview",
+      headline: "Team AI Agent Mission Control",
+      subheadline: "Plan the mission, write a local patch, inspect evidence, and keep release decisions visible.",
+      primaryAction: "Start mission",
+      secondaryAction: "Review evidence",
+      panels: [
+        {
+          label: "Plan",
+          detail: "Local agents create the mission plan and assumptions.",
+          tone: "primary" as const
+        },
+        {
+          label: "Patch",
+          detail: "The controller writes a bounded implementation preview before Git evidence.",
+          tone: "success" as const
+        },
+        {
+          label: "Handoff",
+          detail: "Branch push and draft PR stay policy-gated.",
+          tone: "neutral" as const
+        }
+      ]
+    };
+  }
+
+  if (isDashboard) {
+    return {
+      kind: "dashboard" as const,
+      eyebrow: "Dashboard preview",
+      headline: title,
+      subheadline: command || "Mission request is ready for local implementation evidence.",
+      primaryAction: "Inspect patch",
+      secondaryAction: "Run QA",
+      panels: [
+        {
+          label: "Data",
+          detail: "Preview the requested dashboard surface from bounded local content.",
+          tone: "primary" as const
+        },
+        {
+          label: "Tests",
+          detail: "Typecheck and local CI attach after the implementation patch.",
+          tone: "success" as const
+        },
+        {
+          label: "Review",
+          detail: "Reviewer decisions and delivery evidence stay linked to the preview.",
+          tone: "neutral" as const
+        }
+      ]
+    };
+  }
+
+  return {
+    kind: "workflow" as const,
+    eyebrow: "Workflow preview",
+    headline: title,
+    subheadline: command || "Mission request is ready for local implementation evidence.",
+    primaryAction: "Inspect patch",
+    secondaryAction: "Check handoff",
+    panels: [
+      {
+        label: "Implementation",
+        detail: "A bounded local patch is created before evidence collection.",
+        tone: "primary" as const
+      },
+      {
+        label: "Verification",
+        detail: "Tests, review packet, CI, and delivery report validate the patch.",
+        tone: "success" as const
+      },
+      {
+        label: "Safety",
+        detail: "Remote mutation remains behind guarded automation policy.",
+        tone: "neutral" as const
+      }
+    ]
+  };
 }
 
 function slugForBranch(value: string): string {

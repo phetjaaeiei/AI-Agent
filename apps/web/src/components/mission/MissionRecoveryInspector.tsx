@@ -16,7 +16,9 @@ import type { MissionHistoryRecord } from "../../../../../packages/workflow/src/
 import { gitOperationKindLabel, gitOperationSummary, toolCallKindLabel } from "../../utils/operation-labels.js";
 import { getShortRoleName } from "../../utils/role-labels.js";
 import { formatHistoryTimestamp } from "../../utils/time-format.js";
+import { missionImplementationPreview } from "../../generated/mission-implementation-preview.js";
 import { AutomationDecisionSummary } from "./AutomationDecisionSummary.js";
+import { ImplementationPreviewCard } from "./ImplementationPreviewCard.js";
 import { RemoteHandoffExecutionCard } from "./RemoteHandoffExecutionCard.js";
 
 const missionControllerStages: readonly MissionControllerStage[] = [
@@ -36,6 +38,9 @@ export function MissionRecoveryInspector({ history }: { history: MissionHistoryR
   const packet = history.reviewPackets[0];
   const deliveryArtifactId = controller?.deliveryArtifactContentId ?? packet?.deliveryArtifactContentId;
   const delivery = history.artifactContents.find((artifact) => artifact.id === deliveryArtifactId);
+  const implementationPatchContent = history.artifactContents.find((content) =>
+    content.source === "tool_runner" && content.title === "Local Code Patch"
+  );
   const stageResults = controller?.stageResults
     .filter((result) => result.attempt === controller.attempt)
     .sort((a, b) => missionControllerStages.indexOf(a.stage) - missionControllerStages.indexOf(b.stage)) ?? [];
@@ -79,6 +84,7 @@ export function MissionRecoveryInspector({ history }: { history: MissionHistoryR
             {controller.automationDecisions?.length ? (
               <AutomationDecisionSummary decisions={controller.automationDecisions} title="Recovered handoff decisions" />
             ) : null}
+            <ImplementationPreviewCard patchContent={implementationPatchContent} preview={missionImplementationPreview} />
             <RemoteHandoffExecutionCard
               auditEvents={history.session.auditEvents}
               gitOperations={history.gitOperations}

@@ -953,7 +953,41 @@
   - `npm run build:web`;
   - `git diff --check`.
 
+### Phase 10 Rendered Preview Pipeline
+
+- Completed P10.2 by turning the generated implementation module into a rendered preview pipeline:
+  - generated preview source now includes a typed `MissionImplementationPreviewSurface`;
+  - the controller generates landing, dashboard, or workflow surface variants from the mission command;
+  - `ImplementationPreviewCard` renders a preview canvas with headline, summary, actions, and surface panels;
+  - the canvas can be rendered from seed/generated module data before a run or from the latest `Local Code Patch` artifact after a run.
+- Made preview recovery durable:
+  - `MissionRecoveryInspector` now renders `ImplementationPreviewCard` from archived artifact contents;
+  - recovered mission archives show the generated preview surface without replaying the controller or touching the workspace.
+- Extended verification:
+  - mission-controller verification asserts generated preview surface types and workflow surface content;
+  - Phase 8 E2E asserts dashboard mission output writes dashboard preview surface content;
+  - rendered QA asserts waiting, generated, and recovered implementation preview surfaces across desktop and mobile.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.2 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Continue Phase 10 with rendered preview pipeline and targeted patch expansion beyond the generated preview module.
+- Continue Phase 10 with targeted patch expansion beyond the generated preview module.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

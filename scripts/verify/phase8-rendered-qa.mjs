@@ -117,6 +117,7 @@ try {
   await completePage.getByLabel("Recovered mission evidence").waitFor({ timeout: 10_000 });
   await completePage.getByLabel("Recovered controller run").waitFor({ timeout: 10_000 });
   await assertControllerHandoffDecisions(completePage.getByLabel("Recovered mission evidence"), "desktop recovery");
+  await assertImplementationPreviewGenerated(completePage.getByLabel("Recovered mission evidence"), "desktop recovery");
   await assertSkippedRemoteHandoffExecution(completePage.getByLabel("Recovered mission evidence"), "desktop recovery");
   await completePage.getByLabel("Recovered delivery packet").waitFor({ timeout: 10_000 });
   await assertNoHorizontalOverflow(completePage, "desktop recovery");
@@ -124,6 +125,7 @@ try {
   await completePage.setViewportSize({ width: 390, height: 844 });
   await completePage.waitForTimeout(150);
   await assertControllerHandoffDecisions(completePage.getByLabel("Recovered mission evidence"), "mobile recovery");
+  await assertImplementationPreviewGenerated(completePage.getByLabel("Recovered mission evidence"), "mobile recovery");
   await assertSkippedRemoteHandoffExecution(completePage.getByLabel("Recovered mission evidence"), "mobile recovery");
   await assertNoHorizontalOverflow(completePage, "mobile recovery");
   await completePage.screenshot({ path: "/tmp/team-ai-agent-h4-recovery-mobile.png", fullPage: true });
@@ -682,7 +684,10 @@ async function assertImplementationPreviewWaiting(rootLocator, label) {
   await card.waitFor({ timeout: 10_000 });
   await card.getByText("waiting", { exact: true }).waitFor({ timeout: 10_000 });
   await card.getByText("Waiting for implementation patch").waitFor({ timeout: 10_000 });
+  await card.getByLabel("Rendered implementation preview").waitFor({ timeout: 10_000 });
+  await card.getByText("Implementation surface will render here").waitFor({ timeout: 10_000 });
   assert(await card.locator(".implementation-preview-sections article").count() >= 2, `${label} should render waiting implementation preview sections.`);
+  assert(await card.locator(".implementation-preview-surface-panels article").count() >= 2, `${label} should render waiting implementation preview surface panels.`);
 }
 
 async function assertImplementationPreviewGenerated(rootLocator, label) {
@@ -690,8 +695,12 @@ async function assertImplementationPreviewGenerated(rootLocator, label) {
   await card.waitFor({ timeout: 10_000 });
   await card.getByText("generated", { exact: true }).waitFor({ timeout: 10_000 });
   await card.getByText("Local Code Patch").waitFor({ timeout: 10_000 });
+  await card.getByLabel("Rendered implementation preview").waitFor({ timeout: 10_000 });
+  await card.getByText("Local patch preview is ready").waitFor({ timeout: 10_000 });
+  await card.getByText("Recovery", { exact: true }).waitFor({ timeout: 10_000 });
   await card.locator(".implementation-preview-facts strong").filter({ hasText: "apps/web/src/generated/mission-implementation-preview.ts" }).first().waitFor({ timeout: 10_000 });
   assert(await card.locator(".implementation-preview-sections article").count() >= 2, `${label} should render generated implementation preview sections.`);
+  assert(await card.locator(".implementation-preview-surface-panels article").count() >= 3, `${label} should render generated implementation preview surface panels.`);
 }
 
 async function assertSkippedRemoteHandoffExecution(rootLocator, label) {

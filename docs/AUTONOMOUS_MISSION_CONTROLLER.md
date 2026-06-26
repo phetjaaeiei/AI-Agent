@@ -42,6 +42,8 @@ apps/web/src/generated/mission-implementation-preview.ts
 
 The controller generates a typed preview module from the mission command and writes it through `ToolCallService`. If the local tool-runner blocks the write, the controller stops at `implementation_patch` with `implementation_failed`. The generated file is intentionally narrow for P10.1; future Phase 10 slices can expand implementation generation only after a dedicated path/file-type policy exists.
 
+Phase 10 P10.2 adds a rendered preview surface to that module. Mission Control can render the surface from the generated module before a mission completes, from the latest `Local Code Patch` artifact after execution, and from archived artifact contents during read-only recovery.
+
 ## Local Reviewers
 
 Tech Lead, QA Lead, and Lead BA reviewers run independently. Ollama uses structured JSON output when available; deterministic fallback evaluates the same persisted completeness requirements.

@@ -1,6 +1,6 @@
 import { Code2 } from "lucide-react";
 import type { RuntimeArtifactContent } from "../../../../../packages/workflow/src/index.js";
-import type { MissionImplementationPreview } from "../../generated/mission-implementation-preview.js";
+import type { MissionImplementationPreview, MissionImplementationPreviewSurface } from "../../generated/mission-implementation-preview.js";
 
 export function ImplementationPreviewCard({
   patchContent,
@@ -32,6 +32,25 @@ export function ImplementationPreviewCard({
         <span>{display.commandLabel}</span>
         <code>{display.command}</code>
       </div>
+      <div className={`implementation-preview-surface surface-${display.surface.kind}`} aria-label="Rendered implementation preview">
+        <div className="implementation-preview-surface-copy">
+          <span>{display.surface.eyebrow}</span>
+          <strong>{display.surface.headline}</strong>
+          <p>{display.surface.subheadline}</p>
+          <div className="implementation-preview-actions">
+            <span>{display.surface.primaryAction}</span>
+            <span>{display.surface.secondaryAction}</span>
+          </div>
+        </div>
+        <div className="implementation-preview-surface-panels">
+          {display.surface.panels.map((panel) => (
+            <article className={`tone-${panel.tone}`} key={panel.label}>
+              <strong>{panel.label}</strong>
+              <p>{panel.detail}</p>
+            </article>
+          ))}
+        </div>
+      </div>
       <div className="implementation-preview-sections">
         {display.sections.map((section) => (
           <article key={section.label}>
@@ -53,6 +72,7 @@ function createDisplayPreview(preview: MissionImplementationPreview, patchConten
       sections: preview.sections,
       status: preview.source === "mission_controller" ? "generated" : "waiting",
       summary: preview.summary,
+      surface: preview.surface,
       targetPath: preview.targetPath,
       title: preview.title
     };
@@ -70,8 +90,41 @@ function createDisplayPreview(preview: MissionImplementationPreview, patchConten
     })),
     status: "generated",
     summary: patchContent.summary,
+    surface: createArtifactSurface(patchContent, targetPath),
     targetPath,
     title: patchContent.title
+  };
+}
+
+function createArtifactSurface(patchContent: RuntimeArtifactContent, targetPath: string): MissionImplementationPreviewSurface {
+  const patchSection = patchContent.sections.find((section) => section.heading === "Patch");
+  const lineCount = patchSection?.body.split("\n").filter((line) => line.startsWith("+") || line.startsWith("-")).length ?? 0;
+  const firstEvidence = patchContent.sections[0]?.evidence[0]?.replace("Target: ", "") ?? targetPath;
+
+  return {
+    kind: "workflow",
+    eyebrow: "Rendered from patch artifact",
+    headline: "Local patch preview is ready",
+    subheadline: patchContent.summary,
+    primaryAction: "Inspect patch",
+    secondaryAction: "Run QA",
+    panels: [
+      {
+        label: "Target",
+        detail: firstEvidence,
+        tone: "primary"
+      },
+      {
+        label: "Patch",
+        detail: `${lineCount || 1} changed preview lines recorded.`,
+        tone: "success"
+      },
+      {
+        label: "Recovery",
+        detail: "This surface is rebuilt from archived artifact evidence.",
+        tone: "neutral"
+      }
+    ]
   };
 }
 

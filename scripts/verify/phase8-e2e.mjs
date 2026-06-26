@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -242,6 +242,9 @@ try {
   assert(implementationCalls[0]?.status === "completed", "Implementation file_write should complete.");
   assert(implementationCalls[0]?.targetPath === "apps/web/src/generated/mission-implementation-preview.ts", "Implementation patch should target the generated preview module.");
   assert(Boolean(implementationCalls[0]?.artifactContentId), "Implementation file_write should create a local code patch artifact.");
+  const generatedPreview = await readFile(join(workspace, "apps/web/src/generated/mission-implementation-preview.ts"), "utf8");
+  assert(generatedPreview.includes("MissionImplementationPreviewSurface"), "Implementation patch should generate rendered preview surface types.");
+  assert(generatedPreview.includes("\"Dashboard preview\""), "Dashboard mission should generate a dashboard rendered preview surface.");
   assert(commandCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 1, "Controller should collect typecheck plus the default local CI command profile.");
   assert(commandCalls.every((call) => call.status === "completed"), "All deterministic test command calls should complete.");
   assert(new Set(commandCalls.map((call) => call.command)).has("npm run typecheck"), "Tool evidence should include the controller typecheck command.");

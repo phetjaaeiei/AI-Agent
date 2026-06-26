@@ -3,6 +3,22 @@ export type MissionImplementationPreviewSection = {
   summary: string;
 };
 
+export type MissionImplementationPreviewSurfacePanel = {
+  label: string;
+  detail: string;
+  tone: "primary" | "neutral" | "success";
+};
+
+export type MissionImplementationPreviewSurface = {
+  kind: "landing" | "dashboard" | "workflow";
+  eyebrow: string;
+  headline: string;
+  subheadline: string;
+  primaryAction: string;
+  secondaryAction: string;
+  panels: readonly MissionImplementationPreviewSurfacePanel[];
+};
+
 export type MissionImplementationPreview = {
   schemaVersion: 1;
   generatedAt: string;
@@ -11,6 +27,7 @@ export type MissionImplementationPreview = {
   title: string;
   summary: string;
   targetPath: string;
+  surface: MissionImplementationPreviewSurface;
   sections: readonly MissionImplementationPreviewSection[];
 };
 
@@ -22,6 +39,26 @@ export const missionImplementationPreview: MissionImplementationPreview = {
   title: "Waiting for implementation patch",
   summary: "Run a mission to let the controller create the first bounded local code patch.",
   targetPath: "apps/web/src/generated/mission-implementation-preview.ts",
+  surface: {
+    kind: "workflow",
+    eyebrow: "Queued preview",
+    headline: "Implementation surface will render here",
+    subheadline: "The next mission run writes a bounded preview module, then Mission Control keeps that surface visible through review, CI, delivery, and recovery.",
+    primaryAction: "Run local agents",
+    secondaryAction: "Inspect policy",
+    panels: [
+      {
+        label: "Patch",
+        detail: "Waiting for the local file_write stage.",
+        tone: "primary"
+      },
+      {
+        label: "Evidence",
+        detail: "Git diff, tests, review, and delivery attach after the patch exists.",
+        tone: "neutral"
+      }
+    ]
+  },
   sections: [
     {
       label: "Patch",
