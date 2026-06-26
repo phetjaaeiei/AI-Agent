@@ -12,12 +12,17 @@ import type {
   MissionControllerStopCode,
   MissionControllerStopReason,
   ReviewPacket,
-  RoleId
+  RoleId,
+  ToolCallRecord
 } from "../../../packages/shared/src/index.js";
 import {
+  createDefaultImplementationPatchPolicySnapshot,
   createDefaultAutomationPolicySnapshot,
-  evaluateAutomationAction
+  evaluateAutomationAction,
+  evaluateImplementationPatchTarget,
+  implementationSurfaceTargetPath
 } from "../../../packages/shared/src/index.js";
+import type { ImplementationPatchSurfaceKind } from "../../../packages/shared/src/index.js";
 import {
   createRuntimeAuditEvent,
   createRuntimeMissionState,
@@ -52,6 +57,12 @@ type MissionControllerServiceOptions = {
 
 const REVIEWER_ROLES: readonly RoleId[] = ["tech_lead", "qa_lead", "lead_ba"];
 const IMPLEMENTATION_PREVIEW_PATH = "apps/web/src/generated/mission-implementation-preview.ts";
+
+type ImplementationPatchTargetSource = {
+  content: string;
+  label: string;
+  targetPath: string;
+};
 
 type HandoffExecutionResult = {
   blocked: number;
@@ -272,18 +283,38 @@ export class MissionControllerService {
     controller = await this.beginStage(controller, "implementation_patch", "Writing a bounded local implementation patch.");
     this.assertActive(controller, signal);
     const generatedAt = this.now();
-    const call = await this.options.toolCallService.executeToolCall({
-      missionId: controller.missionId,
-      taskId: controller.taskId,
-      roleId: "frontend_developer",
-      kind: "file_write",
-      targetPath: IMPLEMENTATION_PREVIEW_PATH,
-      content: createImplementationPreviewSource(controller.command, generatedAt)
-    });
-    if (call.status !== "completed") {
-      throw new ControllerStopError("implementation_failed", "implementation_patch", call.errorSummary ?? "Implementation patch did not complete.", [call.id]);
+    const policy = createDefaultImplementationPatchPolicySnapshot();
+    const targets = createImplementationPatchTargets(controller.command, generatedAt);
+    if (targets.length > policy.maxTargetsPerRun) {
+      throw new ControllerStopError("implementation_failed", "implementation_patch", `Implementation patch requested ${targets.length} targets; policy allows ${policy.maxTargetsPerRun}.`, []);
     }
-    return this.completeStage(controller, "implementation_patch", `Implementation patch wrote ${IMPLEMENTATION_PREVIEW_PATH}.`, [call.id, ...(call.artifactContentId ? [call.artifactContentId] : [])]);
+
+    const blocked = targets
+      .map((target) => ({ decision: evaluateImplementationPatchTarget(policy, { targetPath: target.targetPath, content: target.content }), target }))
+      .find(({ decision }) => !decision.allowed);
+    if (blocked) {
+      throw new ControllerStopError("implementation_failed", "implementation_patch", blocked.decision.reason, []);
+    }
+
+    const calls: ToolCallRecord[] = [];
+    for (const target of targets) {
+      this.assertActive(controller, signal);
+      const call = await this.options.toolCallService.executeToolCall({
+        missionId: controller.missionId,
+        taskId: controller.taskId,
+        roleId: "frontend_developer",
+        kind: "file_write",
+        targetPath: target.targetPath,
+        content: target.content
+      });
+      calls.push(call);
+      if (call.status !== "completed") {
+        throw new ControllerStopError("implementation_failed", "implementation_patch", call.errorSummary ?? `${target.label} did not complete.`, [call.id]);
+      }
+    }
+
+    const evidenceIds = calls.flatMap((call) => [call.id, ...(call.artifactContentId ? [call.artifactContentId] : [])]);
+    return this.completeStage(controller, "implementation_patch", `Implementation patch wrote ${calls.length} allowlisted targets.`, evidenceIds);
   }
 
   private async runToolEvidence(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
@@ -761,10 +792,39 @@ function isTerminal(status: MissionControllerRecord["status"]): boolean {
   return ["completed", "blocked", "failed", "cancelled"].includes(status);
 }
 
-function createImplementationPreviewSource(command: string, generatedAt: string): string {
+function createImplementationPatchTargets(command: string, generatedAt: string): readonly ImplementationPatchTargetSource[] {
+  const surfaceKind = selectImplementationSurfaceKind(command);
+  const surfaceModulePath = implementationSurfaceTargetPath(surfaceKind);
+  return [
+    {
+      label: "Implementation preview manifest",
+      targetPath: IMPLEMENTATION_PREVIEW_PATH,
+      content: createImplementationPreviewSource(command, generatedAt, surfaceKind, surfaceModulePath)
+    },
+    {
+      label: `${surfaceKind} implementation surface`,
+      targetPath: surfaceModulePath,
+      content: createImplementationSurfaceModuleSource(command, generatedAt, surfaceKind)
+    }
+  ];
+}
+
+function selectImplementationSurfaceKind(command: string): ImplementationPatchSurfaceKind {
   const normalizedCommand = command.trim().replace(/\s+/g, " ");
-  const isLandingPage = /\b(landing|homepage|marketing|hero|webapp|launch)\b/i.test(normalizedCommand);
-  const isDashboard = /\b(dashboard|report|inventory|analytics|table|insight)\b/i.test(normalizedCommand);
+  if (/\b(landing|homepage|marketing|hero|webapp|launch)\b/i.test(normalizedCommand)) return "landing";
+  if (/\b(dashboard|report|inventory|analytics|table|insight)\b/i.test(normalizedCommand)) return "dashboard";
+  return "workflow";
+}
+
+function createImplementationPreviewSource(
+  command: string,
+  generatedAt: string,
+  surfaceKind: ImplementationPatchSurfaceKind,
+  surfaceModulePath: string
+): string {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  const isLandingPage = surfaceKind === "landing";
+  const isDashboard = surfaceKind === "dashboard";
   const title = isLandingPage ? "Team AI Agent Landing Page" : "Mission Implementation Preview";
   const summary = isLandingPage
     ? "Generated landing-page preview content for the Team AI Agent web app, ready for review and rendered QA wiring."
@@ -812,6 +872,7 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
     title,
     summary,
     targetPath: IMPLEMENTATION_PREVIEW_PATH,
+    surfaceModulePath,
     surface,
     sections
   };
@@ -846,11 +907,55 @@ function createImplementationPreviewSource(command: string, generatedAt: string)
     "  title: string;",
     "  summary: string;",
     "  targetPath: string;",
+    "  surfaceModulePath: string;",
     "  surface: MissionImplementationPreviewSurface;",
     "  sections: readonly MissionImplementationPreviewSection[];",
     "};",
     "",
     `export const missionImplementationPreview: MissionImplementationPreview = ${JSON.stringify(preview, null, 2)};`,
+    ""
+  ].join("\n");
+}
+
+function createImplementationSurfaceModuleSource(command: string, generatedAt: string, surfaceKind: ImplementationPatchSurfaceKind): string {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  const title = surfaceKind === "landing" ? "Team AI Agent Landing Page" : surfaceKind === "dashboard" ? "Mission Dashboard Preview" : "Mission Workflow Preview";
+  const surface = createImplementationPreviewSurface({
+    command: normalizedCommand,
+    isDashboard: surfaceKind === "dashboard",
+    isLandingPage: surfaceKind === "landing",
+    title
+  });
+  const module = {
+    schemaVersion: 1,
+    generatedAt,
+    source: "mission_controller",
+    kind: surfaceKind,
+    command: normalizedCommand || "No mission command provided.",
+    targetPath: implementationSurfaceTargetPath(surfaceKind),
+    surface
+  };
+
+  return [
+    "export type GeneratedImplementationSurfaceModule = {",
+    "  schemaVersion: 1;",
+    "  generatedAt: string;",
+    "  source: \"mission_controller\" | \"seed\";",
+    "  kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "  command: string;",
+    "  targetPath: string;",
+    "  surface: {",
+    "    kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "    eyebrow: string;",
+    "    headline: string;",
+    "    subheadline: string;",
+    "    primaryAction: string;",
+    "    secondaryAction: string;",
+    "    panels: readonly { label: string; detail: string; tone: \"primary\" | \"neutral\" | \"success\" }[];",
+    "  };",
+    "};",
+    "",
+    `export const generatedImplementationSurface: GeneratedImplementationSurfaceModule = ${JSON.stringify(module, null, 2)};`,
     ""
   ].join("\n");
 }

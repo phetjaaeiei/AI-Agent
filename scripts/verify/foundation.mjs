@@ -1,4 +1,7 @@
 import {
+  createDefaultImplementationPatchPolicySnapshot,
+  evaluateImplementationPatchTarget,
+  implementationSurfaceTargetPath,
   ROLE_IDS,
   OPERATIONAL_MISSION_PHASES
 } from "../../dist/packages/shared/src/index.js";
@@ -177,6 +180,42 @@ assert(parsedCommand.recommendedRoleIds.includes("frontend_developer"), "Mission
 assert(parsedCommand.recommendedRoleIds.includes("backend_developer"), "Mission command parser should recommend backend developer.");
 assert(parsedCommand.recommendedRoleIds.includes("automation_qa"), "Mission command parser should recommend automation QA.");
 assert(parsedCommand.recommendedRoleIds.includes("devops_lead"), "Mission command parser should recommend DevOps lead.");
+
+const implementationPatchPolicy = createDefaultImplementationPatchPolicySnapshot();
+const dashboardSurfacePath = implementationSurfaceTargetPath("dashboard");
+const allowedImplementationTarget = evaluateImplementationPatchTarget(implementationPatchPolicy, {
+  targetPath: dashboardSurfacePath,
+  content: "export const dashboardSurfaceReady = true;\n"
+});
+const deniedImplementationTarget = evaluateImplementationPatchTarget(implementationPatchPolicy, {
+  targetPath: "apps/web/src/App.tsx",
+  content: "export const outsideAllowlist = true;\n"
+});
+const extensionPolicyFixture = {
+  ...implementationPatchPolicy,
+  allowedTargets: [
+    ...implementationPatchPolicy.allowedTargets,
+    {
+      id: "implementation-dashboard-json-fixture",
+      kind: "surface_module",
+      path: "apps/web/src/generated/implementation-surfaces/dashboard-surface.json",
+      fileType: "typescript",
+      ownerRoleId: "frontend_developer",
+      purpose: "Extension denial fixture.",
+      surfaceKind: "dashboard",
+      maxBytes: 64_000
+    }
+  ]
+};
+const deniedExtensionTarget = evaluateImplementationPatchTarget(extensionPolicyFixture, {
+  targetPath: "apps/web/src/generated/implementation-surfaces/dashboard-surface.json",
+  content: "{}"
+});
+assert(implementationPatchPolicy.allowedTargets.length === 4, "Implementation patch policy should expose the manifest plus three surface targets.");
+assert(implementationPatchPolicy.maxTargetsPerRun === 2, "Implementation patch policy should allow only two targets per controller run.");
+assert(allowedImplementationTarget.allowed, "Dashboard surface target should be allowed by implementation patch policy.");
+assert(!deniedImplementationTarget.allowed, "Implementation patch policy should deny paths outside the allowlist.");
+assert(!deniedExtensionTarget.allowed, "Implementation patch policy should deny non-TypeScript generated targets.");
 
 const runtimeTasks = [
   {

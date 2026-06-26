@@ -1,10 +1,10 @@
 # Next Implementation Plan: Phase 10 Implementation Patch Loop
 
-Status: Phase 10 complete through P10.2 rendered preview pipeline
+Status: Phase 10 complete through P10.3 targeted patch expansion
 
 ## 1. Current Position
 
-Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage and a rendered preview pipeline before evidence, review, CI, delivery, and handoff policy.
+Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage, a rendered preview pipeline, and targeted patch expansion before evidence, review, CI, delivery, and handoff policy.
 
 - Repository: `phetjaaeiei/AI-Agent`
 - Branch: `codex/phase-7-remote-mutation-policy`
@@ -12,7 +12,7 @@ Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phas
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, a policy-controlled local implementation patch, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
+The app can now run local-first agent planning, policy-controlled targeted local implementation patches, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
 
 The next target is not "let the agent rewrite anything." The target is a visible, bounded implementation loop:
 
@@ -73,9 +73,11 @@ implementation request
 
 ### Slice P10.3: Targeted Patch Expansion
 
-- pending: define a narrow patch-generation policy for safe repo-local edits beyond the generated preview module;
-- pending: add path allowlists, ownership hints, and file-type limits for implementation patches;
-- pending: keep denied paths, secrets, generated build folders, remote Git, merge, deploy, and destructive operations out of implementation generation.
+- complete: added shared `phase10-targeted-patch-v1` implementation patch policy with exact target allowlist, owner-role hints, TypeScript-only extension limits, denied path fragments, byte limits, and two-target controller cap;
+- complete: controller preflights implementation targets against the shared policy before any `file_write`;
+- complete: controller now writes both the preview manifest and one allowlisted surface module (`landing`, `dashboard`, or `workflow`) selected from the mission command;
+- complete: deterministic verification asserts policy allow/deny behavior, two file-write artifacts, generated surface module output, and recovered history counts;
+- complete: rendered QA asserts the implementation preview still renders from the latest targeted patch artifact in live and recovered views.
 
 ### Slice P10.4: Human Approval And Remote Handoff Link
 
@@ -175,6 +177,6 @@ Phase 9 is complete. The shipped baseline includes:
 
 ## 9. Next
 
-- Continue Phase 10 with P10.3 targeted patch expansion.
+- Continue Phase 10 with P10.4 human approval and remote handoff link.
 - Keep implementation writes routed through explicit local policy and visible patch artifacts.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

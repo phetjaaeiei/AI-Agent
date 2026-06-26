@@ -31,6 +31,21 @@ P10.2 makes the generated patch visible as a rendered preview:
 - recovered mission archives render the same preview canvas from archived artifact contents without replaying controller work;
 - rendered QA asserts waiting, generated, and recovered preview surfaces on desktop and mobile.
 
+### P10.3: Targeted Patch Expansion
+
+P10.3 expands implementation generation beyond the single manifest while keeping a tight policy boundary:
+
+- policy version: `phase10-targeted-patch-v1`;
+- max targets per controller run: 2;
+- allowed target 1: `apps/web/src/generated/mission-implementation-preview.ts`;
+- allowed target 2: one selected surface module under `apps/web/src/generated/implementation-surfaces/`;
+- surface variants: `landing`, `dashboard`, `workflow`;
+- file type: TypeScript only;
+- owner role hint: `frontend_developer`;
+- denied fragments include secret paths, Git internals, local data, dependency folders, build output, coverage output, and private-key patterns.
+
+The controller preflights every implementation target through this policy before calling tool-runner `file_write`. The generic local tool runner remains unchanged and still performs workspace-root, denied-path, size, and execution policy checks.
+
 ## Safety Boundary
 
 The patch stage inherits the Phase 3 local tool-runner boundary:
@@ -72,7 +87,8 @@ The full sweep passed on 2026-06-26:
 
 P10.2 reused the same full sweep on 2026-06-26 and added focused assertions for generated surface types, dashboard/workflow variants, desktop/mobile rendered preview canvas states, and recovered preview surfaces.
 
+P10.3 reused the same full sweep on 2026-06-26 and added focused assertions for implementation patch policy allow/deny behavior, two-target controller writes, generated dashboard/workflow surface modules, recovered history counts, and rendered preview recovery from the latest targeted patch artifact.
+
 ## Next Slices
 
-- P10.3: define a narrow patch-generation policy for safe repo-local edits beyond the generated module.
 - P10.4: feed implementation patch, preview, CI, review, and delivery evidence into guarded remote handoff and draft PR content.

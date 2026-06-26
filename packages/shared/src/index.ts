@@ -4,6 +4,7 @@ export * from "./types/artifacts.js";
 export * from "./types/audit.js";
 export * from "./types/automation.js";
 export * from "./types/git.js";
+export * from "./types/implementation-patch.js";
 export * from "./types/model-routing.js";
 export * from "./types/mission-controller.js";
 export * from "./types/roles.js";

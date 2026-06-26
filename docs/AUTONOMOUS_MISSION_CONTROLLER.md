@@ -44,6 +44,8 @@ The controller generates a typed preview module from the mission command and wri
 
 Phase 10 P10.2 adds a rendered preview surface to that module. Mission Control can render the surface from the generated module before a mission completes, from the latest `Local Code Patch` artifact after execution, and from archived artifact contents during read-only recovery.
 
+Phase 10 P10.3 adds a targeted patch policy before file writes. The controller can write only the preview manifest plus one generated surface module selected from the mission command (`landing`, `dashboard`, or `workflow`). Every target is preflighted against `phase10-targeted-patch-v1` before the generic tool-runner `file_write` policy runs.
+
 ## Local Reviewers
 
 Tech Lead, QA Lead, and Lead BA reviewers run independently. Ollama uses structured JSON output when available; deterministic fallback evaluates the same persisted completeness requirements.

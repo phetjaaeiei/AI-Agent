@@ -83,7 +83,8 @@ Phase 8 H3 adds a `Command Output` inspector card that summarizes recent tool an
 
 Phase 10 P10.1 routes the autonomous controller's first implementation patch through `file_write`:
 
-- current target: `apps/web/src/generated/mission-implementation-preview.ts`;
+- current targets: `apps/web/src/generated/mission-implementation-preview.ts` and one allowlisted surface module under `apps/web/src/generated/implementation-surfaces/`;
 - evidence: `Local Code Patch` artifact with bounded patch summary;
 - failure behavior: the controller stops at `implementation_patch` with `implementation_failed`;
+- P10.3 policy: `phase10-targeted-patch-v1` preflights exact paths, TypeScript file type, target count, owner-role hints, denied fragments, and byte limits before `file_write`;
 - future expansion: additional patch targets require a dedicated allowlist or policy before becoming automatic.

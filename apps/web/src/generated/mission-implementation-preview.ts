@@ -27,6 +27,7 @@ export type MissionImplementationPreview = {
   title: string;
   summary: string;
   targetPath: string;
+  surfaceModulePath: string;
   surface: MissionImplementationPreviewSurface;
   sections: readonly MissionImplementationPreviewSection[];
 };
@@ -39,6 +40,7 @@ export const missionImplementationPreview: MissionImplementationPreview = {
   title: "Waiting for implementation patch",
   summary: "Run a mission to let the controller create the first bounded local code patch.",
   targetPath: "apps/web/src/generated/mission-implementation-preview.ts",
+  surfaceModulePath: "apps/web/src/generated/implementation-surfaces/workflow-surface.ts",
   surface: {
     kind: "workflow",
     eyebrow: "Queued preview",

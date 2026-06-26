@@ -987,7 +987,48 @@
   - `npm run build:web`;
   - `git diff --check`.
 
+### Phase 10 Targeted Patch Expansion
+
+- Completed P10.3 by introducing a shared implementation patch policy:
+  - policy version `phase10-targeted-patch-v1`;
+  - exact allowlist for the implementation preview manifest and three generated surface modules;
+  - owner-role hints for `frontend_developer`;
+  - TypeScript-only target extension checks;
+  - denied path fragments for secret, Git, local data, dependency, build, coverage, and private-key paths;
+  - two-target-per-run cap and per-target byte limit.
+- Expanded controller writes beyond the manifest without loosening the generic tool runner:
+  - controller now preflights all implementation targets against the shared policy before writing;
+  - controller writes `apps/web/src/generated/mission-implementation-preview.ts`;
+  - controller also writes one selected surface module under `apps/web/src/generated/implementation-surfaces/`;
+  - `landing`, `dashboard`, or `workflow` is selected from the mission command.
+- Added seed generated surface modules for all allowlisted surface targets so the repository shape is explicit before runtime writes.
+- Extended verification:
+  - foundation verifies implementation patch policy allow/deny behavior;
+  - mission-controller verifies two file-write artifacts and generated workflow surface module output;
+  - Phase 8 E2E verifies dashboard surface module output and recovered history counts;
+  - rendered QA verifies Mission Control still renders the latest targeted patch artifact in delivered and recovered views.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.3 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Continue Phase 10 with targeted patch expansion beyond the generated preview module.
+- Continue Phase 10 with human approval and remote handoff link.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.
