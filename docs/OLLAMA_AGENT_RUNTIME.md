@@ -36,6 +36,18 @@ Mission command
 
 Ollama receives no file, shell, browser, Git, deployment, or external network tools in Milestone C.
 
+## Automatic Learning Queue
+
+Mission Control may auto-capture local evidence as Ollama learning candidates when real mission artifacts are produced by the agent runtime, tool runner, Git runner, review service, orchestrator, or local fallback. This queue is for future local training workflows and prompt/eval improvement.
+
+Current safety boundary:
+
+- capture is local-only and derived from persisted mission evidence;
+- seeded demo artifacts are deprioritized behind real mission evidence;
+- secret paths, denied paths, and raw credentials must not be serialized into learning candidates;
+- Ollama model mutation, fine-tuning, adapter creation, and replacement of the active model remain disabled until a dedicated training policy exists;
+- the UI must show capture state and policy state, so training behavior is never hidden from the operator.
+
 ## Commands
 
 ```sh

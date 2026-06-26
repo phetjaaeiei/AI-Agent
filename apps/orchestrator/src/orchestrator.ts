@@ -3,6 +3,7 @@ import {
   createRuntimeArtifactContent,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot,
   parseMissionCommand
 } from "../../../packages/workflow/src/index.js";
@@ -71,7 +72,18 @@ export async function advanceStoredMission(
   const snapshot = createRuntimeSessionSnapshot({
     missionId: current.missionId,
     commandDraft,
+    assumptionDraft: current.assumptionDraft,
+    missionAssumptions: current.missionAssumptions,
     missionPlan,
+    missionState: createRuntimeMissionState({
+      commandDraft,
+      missionPlan,
+      savedAt: createdAt,
+      previousState: current.missionState,
+      source: "orchestrator",
+      status: "saved",
+      statusReason: "Orchestrator advanced one mission step."
+    }),
     runtime: {
       gateRuns: transition.gateRuns,
       taskRuns: transition.taskRuns,

@@ -6,6 +6,8 @@ Date: 2026-06-19
 
 Phase 3 adds local workspace execution without enabling Git, remote APIs, deployment, or arbitrary shell access. The tool runner is a policy-controlled execution layer for evidence, patches, and test results.
 
+Phase 10 uses the same tool-runner boundary for the autonomous controller implementation-patch stage. The controller does not write files directly; it submits a `file_write` request and records the resulting `Local Code Patch` artifact.
+
 ## Runtime Shape
 
 ```txt
@@ -72,3 +74,18 @@ Example body:
 - `npm run build:web`
 
 The verification covers file read, denied secret paths, outside-workspace paths, file write patch artifacts, passing test evidence, failing test evidence, command blocking, persistence, reset, and HTTP endpoints.
+
+## Mission Control Output Safety
+
+Phase 8 H3 adds a `Command Output` inspector card that summarizes recent tool and Git command evidence. The UI clips previews and redacts the configured workspace root, denied path patterns such as `.env`, bearer tokens, OpenAI-style API keys, and secret-like `key=value` fields before rendering output text. This is a display-safety layer on top of the runner policy; it does not loosen the underlying file, command, or Git execution rules.
+
+## Controller Implementation Patch Usage
+
+Phase 10 P10.1 routes the autonomous controller's first implementation patch through `file_write`:
+
+- current targets: `apps/web/src/generated/mission-implementation-preview.ts` and one allowlisted surface module under `apps/web/src/generated/implementation-surfaces/`;
+- evidence: `Local Code Patch` artifact with bounded patch summary;
+- failure behavior: the controller stops at `implementation_patch` with `implementation_failed`;
+- P10.3 policy: `phase10-targeted-patch-v1` preflights exact paths, TypeScript file type, target count, owner-role hints, denied fragments, and byte limits before `file_write`;
+- Phase 11 P11.1: Mission Control can hydrate the rendered preview from the static generated surface module whose target path matches the latest `Local Code Patch` artifact;
+- future expansion: additional patch targets require a dedicated allowlist or policy before becoming automatic.

@@ -10,6 +10,7 @@ import {
   ResilientReviewExecutor
 } from "../../../packages/agent-core/src/index.js";
 import {
+  createDefaultAutomationPolicySnapshot,
   isGitOperationRequest,
   isMissionControllerStartRequest,
   isReviewDecisionRequest,
@@ -41,6 +42,8 @@ import type { ReviewPacketStore } from "./review-packet-store.js";
 import { MissionControllerService } from "./mission-controller-service.js";
 import { FileMissionControllerStore } from "./mission-controller-store.js";
 import type { MissionControllerStore } from "./mission-controller-store.js";
+import { MissionHistoryService } from "./mission-history-service.js";
+import { FileMissionHistoryStore } from "./mission-history-store.js";
 
 type ServerOptions = {
   store: MissionStore;
@@ -55,6 +58,7 @@ type ServerOptions = {
   reviewPacketStore?: ReviewPacketStore;
   missionControllerService?: MissionControllerService;
   missionControllerStore?: MissionControllerStore;
+  missionHistoryService?: MissionHistoryService;
   now?: () => string;
 };
 
@@ -71,6 +75,7 @@ export function createOrchestratorServer({
   reviewPacketStore,
   missionControllerService,
   missionControllerStore,
+  missionHistoryService,
   now = () => new Date().toISOString()
 }: ServerOptions): Server {
   return createServer(async (request, response) => {
@@ -114,6 +119,11 @@ export function createOrchestratorServer({
       if (request.method === "GET" && url.pathname === "/api/mission/git-policy") {
         if (!gitOperationService) return sendJson(response, 503, { error: "Git runner is not configured." });
         sendJson(response, 200, gitOperationService.getPolicy());
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/mission/automation-policy") {
+        sendJson(response, 200, createDefaultAutomationPolicySnapshot(now()));
         return;
       }
 
@@ -162,6 +172,21 @@ export function createOrchestratorServer({
       if (request.method === "GET" && url.pathname === "/api/mission/controllers") {
         if (!missionControllerService) return sendJson(response, 503, { error: "Mission controller is not configured." });
         sendJson(response, 200, await missionControllerService.listControllers(url.searchParams.get("missionId") ?? undefined));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/mission/history") {
+        if (!missionHistoryService) return sendJson(response, 503, { error: "Mission history is not configured." });
+        sendJson(response, 200, await missionHistoryService.listHistory());
+        return;
+      }
+
+      const missionHistoryMatch = url.pathname.match(/^\/api\/mission\/history\/([^/]+)$/);
+      if (missionHistoryMatch && request.method === "GET") {
+        if (!missionHistoryService) return sendJson(response, 503, { error: "Mission history is not configured." });
+        const historyId = decodeURIComponent(missionHistoryMatch[1]!);
+        const history = await missionHistoryService.getHistory(historyId);
+        sendJson(response, history ? 200 : 404, history ?? { error: "Mission history record not found." });
         return;
       }
 
@@ -348,6 +373,7 @@ export function createOrchestratorServer({
           const activeControllers = (await missionControllerService.listControllers()).filter((item) => item.status === "queued" || item.status === "running");
           await Promise.all(activeControllers.map((item) => missionControllerService.cancelController(item.id)));
         }
+        await missionHistoryService?.captureCurrent("mission_reset");
         const snapshot = await store.resetSession();
         await artifactStore.resetArtifacts();
         await runStore?.reset();
@@ -401,6 +427,11 @@ export function createDefaultFileMissionControllerStore(): FileMissionController
   return new FileMissionControllerStore(storagePath);
 }
 
+export function createDefaultFileMissionHistoryStore(): FileMissionHistoryStore {
+  const storagePath = process.env.TEAM_AI_AGENT_HISTORY_STORE_PATH ?? resolve(process.cwd(), ".data", "mission-history.json");
+  return new FileMissionHistoryStore(storagePath);
+}
+
 export function createDefaultAgentRunService(
   store: MissionStore,
   artifactStore: ArtifactContentStore,
@@ -447,11 +478,14 @@ export function createDefaultToolCallService(
 export function createDefaultGitOperationService(
   store: MissionStore,
   artifactStore: ArtifactContentStore,
-  gitOperationStore: GitOperationStore
+  gitOperationStore: GitOperationStore,
+  reviewPacketStore?: ReviewPacketStore,
+  toolCallStore?: ToolCallStore
 ): GitOperationService {
   const runner = new LocalGitRunner({
     workspaceRoot: process.env.TEAM_AI_AGENT_WORKSPACE_ROOT ?? process.cwd(),
     allowGitRead: process.env.TEAM_AI_AGENT_ALLOW_GIT_READ !== "false",
+    allowRemoteRead: process.env.TEAM_AI_AGENT_ALLOW_GIT_REMOTE_READ !== "false",
     allowGitCommit: process.env.TEAM_AI_AGENT_ALLOW_GIT_COMMIT === "true",
     allowRemotePush: process.env.TEAM_AI_AGENT_ALLOW_GIT_PUSH === "true",
     allowPullRequestCreate: process.env.TEAM_AI_AGENT_ALLOW_PR_CREATE === "true",
@@ -462,7 +496,9 @@ export function createDefaultGitOperationService(
     runner,
     operationStore: gitOperationStore,
     missionStore: store,
-    artifactStore
+    artifactStore,
+    ...(reviewPacketStore ? { reviewPacketStore } : {}),
+    ...(toolCallStore ? { toolCallStore } : {})
   });
 }
 
@@ -490,7 +526,8 @@ export function createDefaultMissionControllerService(
   agentRunService: AgentRunService,
   toolCallService: ToolCallService,
   gitOperationService: GitOperationService,
-  reviewPacketService: ReviewPacketService
+  reviewPacketService: ReviewPacketService,
+  historyRecorder?: MissionHistoryService
 ): MissionControllerService {
   const configuredMode = parseRuntimeMode(process.env.AGENT_RUNTIME_MODE);
   const reviewer = new ResilientReviewExecutor(
@@ -507,7 +544,8 @@ export function createDefaultMissionControllerService(
     toolCallService,
     gitOperationService,
     reviewPacketService,
-    reviewer
+    reviewer,
+    ...(historyRecorder ? { historyRecorder } : {})
   });
 }
 
@@ -584,9 +622,10 @@ if (isEntrypoint) {
   const gitOperationStore = createDefaultFileGitOperationStore();
   const reviewPacketStore = createDefaultFileReviewPacketStore();
   const missionControllerStore = createDefaultFileMissionControllerStore();
+  const missionHistoryStore = createDefaultFileMissionHistoryStore();
   const toolCallService = createDefaultToolCallService(store, artifactStore, toolCallStore);
   const agentRunService = createDefaultAgentRunService(store, artifactStore, runStore);
-  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore);
+  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore, reviewPacketStore, toolCallStore);
   const reviewPacketService = createDefaultReviewPacketService(
     store,
     artifactStore,
@@ -595,13 +634,24 @@ if (isEntrypoint) {
     reviewPacketStore,
     toolCallService
   );
+  const missionHistoryService = new MissionHistoryService({
+    historyStore: missionHistoryStore,
+    missionStore: store,
+    controllerStore: missionControllerStore,
+    runStore,
+    toolCallStore,
+    gitOperationStore,
+    reviewPacketStore,
+    artifactStore
+  });
   const missionControllerService = createDefaultMissionControllerService(
     missionControllerStore,
     store,
     agentRunService,
     toolCallService,
     gitOperationService,
-    reviewPacketService
+    reviewPacketService,
+    missionHistoryService
   );
   const server = createOrchestratorServer({
     store,
@@ -615,7 +665,8 @@ if (isEntrypoint) {
     reviewPacketStore,
     reviewPacketService,
     missionControllerStore,
-    missionControllerService
+    missionControllerService,
+    missionHistoryService
   });
 
   void missionControllerService.recoverInterruptedControllers();

@@ -19,6 +19,7 @@ import {
   calculateAccuracyScore,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
 import type { RuntimeArtifactContent, RuntimeArtifactSection } from "../../../packages/workflow/src/index.js";
@@ -298,6 +299,15 @@ export class AgentRunService {
     });
     const nextSnapshot = createRuntimeSessionSnapshot({
       ...current,
+      missionState: createRuntimeMissionState({
+        commandDraft: current.commandDraft,
+        missionPlan: current.missionPlan,
+        savedAt: createdAt,
+        previousState: current.missionState,
+        source: "agent_runtime",
+        status: passed ? current.missionState.status === "running" ? "running" : "saved" : "blocked",
+        statusReason: passed ? `Planning artifact verified at ${score}/100.` : `Planning verification stopped at ${score}/100.`
+      }),
       runtime: {
         ...current.runtime,
         gateRuns: {
@@ -350,6 +360,15 @@ export class AgentRunService {
     });
     await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
       ...current,
+      missionState: createRuntimeMissionState({
+        commandDraft: current.commandDraft,
+        missionPlan: current.missionPlan,
+        savedAt: createdAt,
+        previousState: current.missionState,
+        source: "agent_runtime",
+        status: "blocked",
+        statusReason: `${run.errorCode ?? "provider_error"}: ${run.errorSummary ?? "Agent run failed."}`
+      }),
       auditEvents: [audit, ...current.auditEvents].slice(0, 200),
       savedAt: createdAt
     }));

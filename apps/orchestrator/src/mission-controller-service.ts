@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ReviewExecutor } from "../../../packages/agent-core/src/index.js";
 import type {
+  AutomationDecision,
+  AutomationEvidenceContext,
   GitOperationRecord,
   LocalReviewerResult,
   MissionControllerRecord,
@@ -10,13 +12,23 @@ import type {
   MissionControllerStopCode,
   MissionControllerStopReason,
   ReviewPacket,
-  RoleId
+  RoleId,
+  ToolCallRecord
 } from "../../../packages/shared/src/index.js";
 import {
+  createDefaultImplementationPatchPolicySnapshot,
+  createDefaultAutomationPolicySnapshot,
+  evaluateAutomationAction,
+  evaluateImplementationPatchTarget,
+  implementationSurfaceTargetPath
+} from "../../../packages/shared/src/index.js";
+import type { ImplementationPatchSurfaceKind } from "../../../packages/shared/src/index.js";
+import {
   createRuntimeAuditEvent,
+  createRuntimeMissionState,
   createRuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
-import type { RuntimeActivityEvent } from "../../../packages/workflow/src/index.js";
+import type { RuntimeActivityEvent, RuntimeAuditEvent } from "../../../packages/workflow/src/index.js";
 import type { AgentRunService } from "./agent-run-service.js";
 import type { GitOperationService } from "./git-operation-service.js";
 import type { MissionControllerStore } from "./mission-controller-store.js";
@@ -32,12 +44,34 @@ type MissionControllerServiceOptions = {
   gitOperationService: GitOperationService;
   reviewPacketService: ReviewPacketService;
   reviewer: ReviewExecutor;
+  historyRecorder?: {
+    captureController(
+      controller: MissionControllerRecord,
+      archiveReason?: "controller_terminal" | "before_retry"
+    ): Promise<unknown>;
+  };
   now?: () => string;
   maxAttempts?: number;
   reviewerRevisionLimit?: number;
 };
 
 const REVIEWER_ROLES: readonly RoleId[] = ["tech_lead", "qa_lead", "lead_ba"];
+const IMPLEMENTATION_PREVIEW_PATH = "apps/web/src/generated/mission-implementation-preview.ts";
+
+type ImplementationPatchTargetSource = {
+  content: string;
+  label: string;
+  targetPath: string;
+};
+
+type HandoffExecutionResult = {
+  blocked: number;
+  executed: number;
+  failed: number;
+  operations: readonly GitOperationRecord[];
+  skipped: number;
+  summaries: readonly string[];
+};
 
 export class MissionControllerService {
   private readonly active = new Map<string, AbortController>();
@@ -116,6 +150,7 @@ export class MissionControllerService {
       updatedAt: completedAt
     });
     await this.persistActivity(cancelled, "Mission controller cancelled", cancelled.stopReason!.message, "warning");
+    await this.options.historyRecorder?.captureController(cancelled);
     return cancelled;
   }
 
@@ -123,6 +158,7 @@ export class MissionControllerService {
     const controller = await this.requireController(controllerId);
     if (!isTerminal(controller.status) || controller.status === "completed") throw new Error("Only blocked, failed, or cancelled controllers can be retried.");
     if (controller.attempt >= controller.maxAttempts) throw new Error("Mission controller retry limit reached.");
+    await this.options.historyRecorder?.captureController(controller, "before_retry");
     const {
       agentRunId: _agentRunId,
       reviewPacketId: _reviewPacketId,
@@ -182,16 +218,19 @@ export class MissionControllerService {
         updatedAt: this.now()
       });
       controller = await this.runPlanning(controller, abortController.signal);
+      controller = await this.runImplementationPatch(controller, abortController.signal);
       controller = await this.runToolEvidence(controller, abortController.signal);
       controller = await this.runGitEvidence(controller, abortController.signal);
       controller = await this.runReviewPacket(controller, abortController.signal);
       controller = await this.runLocalCi(controller, abortController.signal);
       controller = await this.runReviewers(controller, abortController.signal);
       controller = await this.runDelivery(controller, abortController.signal);
+      controller = await this.runHandoffPolicy(controller, abortController.signal);
       this.assertActive(controller, abortController.signal);
       const completedAt = this.now();
       controller = await this.patch(controller, { status: "completed", completedAt, updatedAt: completedAt });
       await this.persistActivity(controller, "Mission completed", "All local stages passed and the delivery report is ready.", "success");
+      await this.options.historyRecorder?.captureController(controller);
     } catch (error) {
       const persisted = await this.getController(controllerId);
       if (!persisted || persisted.status === "cancelled") return;
@@ -215,6 +254,7 @@ export class MissionControllerService {
         updatedAt: completedAt
       });
       await this.persistActivity(controller, status === "failed" ? "Mission controller failed" : "Mission controller stopped", stopped.message, status === "failed" ? "danger" : "warning");
+      await this.options.historyRecorder?.captureController(controller);
     } finally {
       this.active.delete(controllerId);
     }
@@ -237,6 +277,44 @@ export class MissionControllerService {
       throw new ControllerStopError("planning_blocked", "planning", terminal.errorSummary ?? `Planning ended with ${terminal.status}.`, [terminal.id]);
     }
     return this.completeStage(controller, "planning", `Planning completed with ${terminal.provider}.`, [terminal.id, ...(terminal.outputArtifactId ? [terminal.outputArtifactId] : [])]);
+  }
+
+  private async runImplementationPatch(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
+    controller = await this.beginStage(controller, "implementation_patch", "Writing a bounded local implementation patch.");
+    this.assertActive(controller, signal);
+    const generatedAt = this.now();
+    const policy = createDefaultImplementationPatchPolicySnapshot();
+    const targets = createImplementationPatchTargets(controller.command, generatedAt);
+    if (targets.length > policy.maxTargetsPerRun) {
+      throw new ControllerStopError("implementation_failed", "implementation_patch", `Implementation patch requested ${targets.length} targets; policy allows ${policy.maxTargetsPerRun}.`, []);
+    }
+
+    const blocked = targets
+      .map((target) => ({ decision: evaluateImplementationPatchTarget(policy, { targetPath: target.targetPath, content: target.content }), target }))
+      .find(({ decision }) => !decision.allowed);
+    if (blocked) {
+      throw new ControllerStopError("implementation_failed", "implementation_patch", blocked.decision.reason, []);
+    }
+
+    const calls: ToolCallRecord[] = [];
+    for (const target of targets) {
+      this.assertActive(controller, signal);
+      const call = await this.options.toolCallService.executeToolCall({
+        missionId: controller.missionId,
+        taskId: controller.taskId,
+        roleId: "frontend_developer",
+        kind: "file_write",
+        targetPath: target.targetPath,
+        content: target.content
+      });
+      calls.push(call);
+      if (call.status !== "completed") {
+        throw new ControllerStopError("implementation_failed", "implementation_patch", call.errorSummary ?? `${target.label} did not complete.`, [call.id]);
+      }
+    }
+
+    const evidenceIds = calls.flatMap((call) => [call.id, ...(call.artifactContentId ? [call.artifactContentId] : [])]);
+    return this.completeStage(controller, "implementation_patch", `Implementation patch wrote ${calls.length} allowlisted targets.`, evidenceIds);
   }
 
   private async runToolEvidence(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
@@ -341,6 +419,160 @@ export class MissionControllerService {
     return this.completeStage(controller, "delivery", "Offline delivery report generated.", [delivered.id, delivered.deliveryArtifactContentId]);
   }
 
+  private async runHandoffPolicy(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
+    controller = await this.beginStage(controller, "handoff_policy", "Evaluating guarded automation handoff policy.");
+    await this.persistAutomationHandoffActivity(controller, "Automation handoff preflight started", "Checking bounded-auto eligibility without executing remote or deployment actions.", "info");
+    this.assertActive(controller, signal);
+
+    const packet = await this.requireReviewPacket(controller);
+    const branchName = `codex/${slugForBranch(controller.taskId)}`;
+    const operations: GitOperationRecord[] = [];
+
+    for (const kind of ["remote_evidence", "branch_push_policy", "draft_pr_policy"] as const) {
+      const operation = await this.options.gitOperationService.executeOperation({
+        missionId: controller.missionId,
+        taskId: controller.taskId,
+        roleId: "release_manager",
+        kind,
+        baseBranch: "main",
+        branchName,
+        reviewPacketId: packet.id
+      });
+      operations.push(operation);
+    }
+
+    const decisions = createHandoffAutomationDecisions({
+      gitPolicy: this.options.gitOperationService.getPolicy(),
+      operations,
+      packet,
+      checkedAt: this.now()
+    });
+    const execution = await this.runBoundedRemoteHandoffExecutions({
+      branchName,
+      controller,
+      decisions,
+      packet,
+      signal
+    });
+    const autoReady = decisions.filter((decision) => decision.canRunAutomatically).length;
+    const blocked = decisions.filter((decision) => decision.blockers.length > 0 || decision.disabled).length;
+    const summary = createHandoffSummary({ autoReady, blocked, execution });
+
+    controller = await this.patch(controller, { automationDecisions: decisions, updatedAt: this.now() });
+    controller = await this.completeStage(controller, "handoff_policy", summary, [
+      ...operations.map((operation) => operation.id),
+      ...execution.operations.map((operation) => operation.id)
+    ]);
+    await this.persistAutomationHandoffActivity(controller, "Automation handoff preflight completed", summary, autoReady > 0 ? "success" : "warning");
+    return controller;
+  }
+
+  private async runBoundedRemoteHandoffExecutions({
+    branchName,
+    controller,
+    decisions,
+    packet,
+    signal
+  }: {
+    branchName: string;
+    controller: MissionControllerRecord;
+    decisions: readonly AutomationDecision[];
+    packet: ReviewPacket;
+    signal: AbortSignal;
+  }): Promise<HandoffExecutionResult> {
+    const candidates = [
+      { decisionKind: "git_branch_push", operationKind: "branch_push", label: "Branch push" },
+      { decisionKind: "git_draft_pr_create", operationKind: "draft_pr_create", label: "Draft PR creation" }
+    ] as const;
+    const executable = candidates.filter((candidate) =>
+      decisions.some((decision) => decision.kind === candidate.decisionKind && decision.canRunAutomatically)
+    );
+
+    if (executable.length === 0) {
+      const skipped = candidates.length;
+      await this.persistAutomationHandoffActivity(
+        controller,
+        "Remote handoff execution skipped",
+        "No remote handoff action met bounded-auto policy requirements.",
+        "warning",
+        "automation_handoff_execution_skipped"
+      );
+      return {
+        blocked: 0,
+        executed: 0,
+        failed: 0,
+        operations: [],
+        skipped,
+        summaries: ["No remote handoff action met bounded-auto policy requirements."]
+      };
+    }
+
+    await this.persistAutomationHandoffActivity(
+      controller,
+      "Remote handoff execution started",
+      `${executable.length} remote handoff action(s) passed the bounded-auto policy gate.`,
+      "info",
+      "automation_handoff_execution_started"
+    );
+
+    const operations: GitOperationRecord[] = [];
+    const summaries: string[] = [];
+    let executed = 0;
+    let blocked = 0;
+    let failed = 0;
+    let skipped = candidates.length - executable.length;
+
+    for (const candidate of candidates) {
+      const decision = decisions.find((item) => item.kind === candidate.decisionKind);
+      if (!decision?.canRunAutomatically) {
+        summaries.push(`${candidate.label} skipped: ${decision?.reason ?? "no automation decision was recorded"}.`);
+        continue;
+      }
+
+      this.assertActive(controller, signal);
+      const operation = await this.options.gitOperationService.executeOperation({
+        missionId: controller.missionId,
+        taskId: controller.taskId,
+        roleId: "release_manager",
+        kind: candidate.operationKind,
+        baseBranch: "main",
+        branchName,
+        reviewPacketId: packet.id
+      });
+      operations.push(operation);
+
+      if (operation.status === "completed") {
+        executed += 1;
+        summaries.push(`${candidate.label} completed: ${operation.result?.summary ?? operation.policy.reason}`);
+        continue;
+      }
+
+      if (operation.status === "blocked") blocked += 1;
+      else failed += 1;
+      summaries.push(`${candidate.label} ${operation.status}: ${operation.errorSummary ?? operation.policy.reason}`);
+
+      if (candidate.operationKind === "branch_push") {
+        const draftCandidate = candidates.find((item) => item.operationKind === "draft_pr_create");
+        if (draftCandidate && decisions.some((item) => item.kind === draftCandidate.decisionKind && item.canRunAutomatically)) {
+          skipped += 1;
+          summaries.push("Draft PR creation skipped because branch push did not complete.");
+        }
+        break;
+      }
+    }
+
+    const tone: RuntimeActivityEvent["tone"] = failed > 0 ? "danger" : blocked > 0 ? "warning" : "success";
+    await this.persistAutomationHandoffActivity(
+      controller,
+      "Remote handoff execution completed",
+      `Remote handoff execution finished with ${executed} completed, ${blocked} blocked, ${failed} failed, and ${skipped} skipped action(s).`,
+      tone,
+      "automation_handoff_execution_completed"
+    );
+
+    return { blocked, executed, failed, operations, skipped, summaries };
+  }
+
   private async beginStage(controller: MissionControllerRecord, stage: MissionControllerStage, summary: string): Promise<MissionControllerRecord> {
     const startedAt = this.now();
     return this.patch(controller, {
@@ -392,6 +624,8 @@ export class MissionControllerService {
     const current = await this.options.missionStore.readSession();
     const createdAt = this.now();
     const terminal = isTerminal(controller.status);
+    const missionStatus = controller.status === "completed" ? "delivered" : terminal ? "blocked" : "running";
+    const statusReason = controller.stopReason?.message ?? summary;
     const activity: RuntimeActivityEvent = {
       id: `evt-controller-${controller.id}-${controller.status}-${controller.attempt}`,
       roleId: terminal && controller.status === "completed" ? "chief_of_staff" : "project_manager",
@@ -403,6 +637,15 @@ export class MissionControllerService {
     };
     await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
       ...current,
+      missionState: createRuntimeMissionState({
+        commandDraft: current.commandDraft,
+        missionPlan: current.missionPlan,
+        savedAt: createdAt,
+        previousState: current.missionState,
+        source: "mission_controller",
+        status: missionStatus,
+        statusReason
+      }),
       runtime: {
         ...current.runtime,
         activityLog: [activity, ...current.runtime.activityLog].slice(0, 80)
@@ -419,6 +662,109 @@ export class MissionControllerService {
       savedAt: createdAt
     }));
   }
+
+  private async persistAutomationHandoffActivity(
+    controller: MissionControllerRecord,
+    title: string,
+    summary: string,
+    tone: RuntimeActivityEvent["tone"],
+    action?: RuntimeAuditEvent["action"]
+  ): Promise<void> {
+    const current = await this.options.missionStore.readSession();
+    const createdAt = this.now();
+    const severity = tone === "danger" ? "danger" : tone === "warning" ? "warning" : tone === "success" ? "success" : "info";
+    const activity: RuntimeActivityEvent = {
+      id: `evt-automation-handoff-${controller.id}-${controller.attempt}-${createdAt}`,
+      roleId: "release_manager",
+      type: tone === "warning" || tone === "danger" ? "risk" : "phase",
+      title,
+      summary,
+      tone,
+      time: formatTime(createdAt)
+    };
+    await this.options.missionStore.writeSession(createRuntimeSessionSnapshot({
+      ...current,
+      runtime: {
+        ...current.runtime,
+        activityLog: [activity, ...current.runtime.activityLog].slice(0, 80)
+      },
+      auditEvents: [createRuntimeAuditEvent({
+        id: `audit-automation-handoff-${controller.id}-${controller.attempt}-${createdAt}`,
+        actorRoleId: "release_manager",
+        action: action ?? (title.includes("completed") ? "automation_handoff_completed" : "automation_handoff_started"),
+        summary,
+        severity,
+        entityId: controller.id,
+        createdAt
+      }), ...current.auditEvents].slice(0, 200),
+      savedAt: createdAt
+    }));
+  }
+}
+
+function createHandoffAutomationDecisions({
+  checkedAt,
+  gitPolicy,
+  operations,
+  packet
+}: {
+  checkedAt: string;
+  gitPolicy: ReturnType<GitOperationService["getPolicy"]>;
+  operations: readonly GitOperationRecord[];
+  packet: ReviewPacket;
+}): AutomationDecision[] {
+  const snapshot = createDefaultAutomationPolicySnapshot(checkedAt);
+  const remoteEvidence = operations.find((operation) => operation.kind === "remote_evidence")?.result?.remoteEvidence;
+  const worktree = operations.find((operation) => operation.result?.worktree)?.result?.worktree;
+  const reviewerApproval = packet.requiredReviewerRoleIds.length > 0 &&
+    packet.requiredReviewerRoleIds.every((roleId) =>
+      packet.reviews.some((review) => review.reviewerRoleId === roleId && review.decision === "pass")
+    );
+  const evidence: AutomationEvidenceContext = {
+    policy_switch_enabled: gitPolicy.allowRemotePush || gitPolicy.allowPullRequestCreate,
+    connector_policy_present: gitPolicy.allowRemotePush || gitPolicy.allowPullRequestCreate,
+    reviewed_delivery: packet.status === "delivered" && Boolean(packet.deliveryArtifactContentId),
+    passing_local_ci: packet.ciRun?.status === "passed",
+    reviewer_approval: reviewerApproval,
+    remote_branch_current: remoteEvidence?.publicationState === "published_current" && worktree?.isClean === true,
+    draft_pr_open: remoteEvidence?.pullRequest.state === "open",
+    rollback_plan: false,
+    staging_smoke_passed: false,
+    production_approval: false,
+    bounded_retry_budget: false,
+    no_secret_material: worktree ? !worktree.hasDeniedChanges : false
+  };
+  return ([
+    "git_branch_push",
+    "git_draft_pr_create",
+    "deploy_staging",
+    "pull_request_merge",
+    "deploy_production",
+    "force_push",
+    "branch_delete",
+    "destructive_git_reset",
+    "destructive_git_checkout",
+    "secret_serialization",
+    "silent_fine_tuning",
+    "unbounded_autonomous_loop"
+  ] as const).map((kind) => evaluateAutomationAction(snapshot, { kind, requestedMode: "auto", evidence }, checkedAt));
+}
+
+function createHandoffSummary({
+  autoReady,
+  blocked,
+  execution
+}: {
+  autoReady: number;
+  blocked: number;
+  execution: HandoffExecutionResult;
+}): string {
+  if (autoReady === 0) {
+    return `No remote or deployment action is eligible for bounded-auto handoff; ${blocked} action(s) remain blocked, manual, or disabled. Remote handoff execution skipped.`;
+  }
+
+  const executionSummary = `${execution.executed} executed, ${execution.blocked} blocked, ${execution.failed} failed, ${execution.skipped} skipped.`;
+  return `${autoReady} guarded automation action(s) are eligible for bounded-auto handoff. Remote handoff execution: ${executionSummary}`;
 }
 
 class ControllerStopError extends Error {
@@ -444,6 +790,277 @@ function upsertStageResult(results: readonly MissionControllerStageResult[], nex
 
 function isTerminal(status: MissionControllerRecord["status"]): boolean {
   return ["completed", "blocked", "failed", "cancelled"].includes(status);
+}
+
+function createImplementationPatchTargets(command: string, generatedAt: string): readonly ImplementationPatchTargetSource[] {
+  const surfaceKind = selectImplementationSurfaceKind(command);
+  const surfaceModulePath = implementationSurfaceTargetPath(surfaceKind);
+  return [
+    {
+      label: "Implementation preview manifest",
+      targetPath: IMPLEMENTATION_PREVIEW_PATH,
+      content: createImplementationPreviewSource(command, generatedAt, surfaceKind, surfaceModulePath)
+    },
+    {
+      label: `${surfaceKind} implementation surface`,
+      targetPath: surfaceModulePath,
+      content: createImplementationSurfaceModuleSource(command, generatedAt, surfaceKind)
+    }
+  ];
+}
+
+function selectImplementationSurfaceKind(command: string): ImplementationPatchSurfaceKind {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  if (/\b(landing|homepage|marketing|hero|webapp|launch)\b/i.test(normalizedCommand)) return "landing";
+  if (/\b(dashboard|report|inventory|analytics|table|insight)\b/i.test(normalizedCommand)) return "dashboard";
+  return "workflow";
+}
+
+function createImplementationPreviewSource(
+  command: string,
+  generatedAt: string,
+  surfaceKind: ImplementationPatchSurfaceKind,
+  surfaceModulePath: string
+): string {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  const isLandingPage = surfaceKind === "landing";
+  const isDashboard = surfaceKind === "dashboard";
+  const title = isLandingPage ? "Team AI Agent Landing Page" : "Mission Implementation Preview";
+  const summary = isLandingPage
+    ? "Generated landing-page preview content for the Team AI Agent web app, ready for review and rendered QA wiring."
+    : "Generated implementation preview content from the current mission command, ready for review and test evidence.";
+  const sections = isLandingPage
+    ? [
+      {
+        label: "Hero",
+        summary: "Position Team AI Agent as a local-first AI company control room with one mission intake and inspectable execution evidence."
+      },
+      {
+        label: "Proof",
+        summary: "Show planning, implementation patch, tests, review packet, delivery report, and handoff policy as visible checkpoints."
+      },
+      {
+        label: "Action",
+        summary: "Invite operators to save a mission, run local agents, inspect artifacts, and keep merge or deployment manual."
+      }
+    ]
+    : [
+      {
+        label: "Implementation",
+        summary: "Create a bounded local patch through the tool-runner file_write policy before collecting Git evidence."
+      },
+      {
+        label: "Verification",
+        summary: "Feed the generated patch into typecheck, local CI, reviewer decisions, delivery report, and mission history recovery."
+      },
+      {
+        label: "Safety",
+        summary: "Keep the change local and reviewable; remote push, PR creation, merge, and deploy stay behind policy gates."
+      }
+    ];
+  const surface = createImplementationPreviewSurface({
+    command: normalizedCommand,
+    isDashboard,
+    isLandingPage,
+    title
+  });
+  const preview = {
+    schemaVersion: 1,
+    generatedAt,
+    source: "mission_controller",
+    command: normalizedCommand || "No mission command provided.",
+    title,
+    summary,
+    targetPath: IMPLEMENTATION_PREVIEW_PATH,
+    surfaceModulePath,
+    surface,
+    sections
+  };
+
+  return [
+    "export type MissionImplementationPreviewSection = {",
+    "  label: string;",
+    "  summary: string;",
+    "};",
+    "",
+    "export type MissionImplementationPreviewSurfacePanel = {",
+    "  label: string;",
+    "  detail: string;",
+    "  tone: \"primary\" | \"neutral\" | \"success\";",
+    "};",
+    "",
+    "export type MissionImplementationPreviewSurface = {",
+    "  kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "  eyebrow: string;",
+    "  headline: string;",
+    "  subheadline: string;",
+    "  primaryAction: string;",
+    "  secondaryAction: string;",
+    "  panels: readonly MissionImplementationPreviewSurfacePanel[];",
+    "};",
+    "",
+    "export type MissionImplementationPreview = {",
+    "  schemaVersion: 1;",
+    "  generatedAt: string;",
+    "  source: \"mission_controller\" | \"seed\";",
+    "  command: string;",
+    "  title: string;",
+    "  summary: string;",
+    "  targetPath: string;",
+    "  surfaceModulePath: string;",
+    "  surface: MissionImplementationPreviewSurface;",
+    "  sections: readonly MissionImplementationPreviewSection[];",
+    "};",
+    "",
+    `export const missionImplementationPreview: MissionImplementationPreview = ${JSON.stringify(preview, null, 2)};`,
+    ""
+  ].join("\n");
+}
+
+function createImplementationSurfaceModuleSource(command: string, generatedAt: string, surfaceKind: ImplementationPatchSurfaceKind): string {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  const title = surfaceKind === "landing" ? "Team AI Agent Landing Page" : surfaceKind === "dashboard" ? "Mission Dashboard Preview" : "Mission Workflow Preview";
+  const surface = createImplementationPreviewSurface({
+    command: normalizedCommand,
+    isDashboard: surfaceKind === "dashboard",
+    isLandingPage: surfaceKind === "landing",
+    title
+  });
+  const module = {
+    schemaVersion: 1,
+    generatedAt,
+    source: "mission_controller",
+    kind: surfaceKind,
+    command: normalizedCommand || "No mission command provided.",
+    targetPath: implementationSurfaceTargetPath(surfaceKind),
+    surface
+  };
+
+  return [
+    "export type GeneratedImplementationSurfaceModule = {",
+    "  schemaVersion: 1;",
+    "  generatedAt: string;",
+    "  source: \"mission_controller\" | \"seed\";",
+    "  kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "  command: string;",
+    "  targetPath: string;",
+    "  surface: {",
+    "    kind: \"landing\" | \"dashboard\" | \"workflow\";",
+    "    eyebrow: string;",
+    "    headline: string;",
+    "    subheadline: string;",
+    "    primaryAction: string;",
+    "    secondaryAction: string;",
+    "    panels: readonly { label: string; detail: string; tone: \"primary\" | \"neutral\" | \"success\" }[];",
+    "  };",
+    "};",
+    "",
+    `export const generatedImplementationSurface: GeneratedImplementationSurfaceModule = ${JSON.stringify(module, null, 2)};`,
+    ""
+  ].join("\n");
+}
+
+function createImplementationPreviewSurface({
+  command,
+  isDashboard,
+  isLandingPage,
+  title
+}: {
+  command: string;
+  isDashboard: boolean;
+  isLandingPage: boolean;
+  title: string;
+}) {
+  if (isLandingPage) {
+    return {
+      kind: "landing" as const,
+      eyebrow: "Landing preview",
+      headline: "Team AI Agent Mission Control",
+      subheadline: "Plan the mission, write a local patch, inspect evidence, and keep release decisions visible.",
+      primaryAction: "Start mission",
+      secondaryAction: "Review evidence",
+      panels: [
+        {
+          label: "Plan",
+          detail: "Local agents create the mission plan and assumptions.",
+          tone: "primary" as const
+        },
+        {
+          label: "Patch",
+          detail: "The controller writes a bounded implementation preview before Git evidence.",
+          tone: "success" as const
+        },
+        {
+          label: "Handoff",
+          detail: "Branch push and draft PR stay policy-gated.",
+          tone: "neutral" as const
+        }
+      ]
+    };
+  }
+
+  if (isDashboard) {
+    return {
+      kind: "dashboard" as const,
+      eyebrow: "Dashboard preview",
+      headline: title,
+      subheadline: command || "Mission request is ready for local implementation evidence.",
+      primaryAction: "Inspect patch",
+      secondaryAction: "Run QA",
+      panels: [
+        {
+          label: "Data",
+          detail: "Preview the requested dashboard surface from bounded local content.",
+          tone: "primary" as const
+        },
+        {
+          label: "Tests",
+          detail: "Typecheck and local CI attach after the implementation patch.",
+          tone: "success" as const
+        },
+        {
+          label: "Review",
+          detail: "Reviewer decisions and delivery evidence stay linked to the preview.",
+          tone: "neutral" as const
+        }
+      ]
+    };
+  }
+
+  return {
+    kind: "workflow" as const,
+    eyebrow: "Workflow preview",
+    headline: title,
+    subheadline: command || "Mission request is ready for local implementation evidence.",
+    primaryAction: "Inspect patch",
+    secondaryAction: "Check handoff",
+    panels: [
+      {
+        label: "Implementation",
+        detail: "A bounded local patch is created before evidence collection.",
+        tone: "primary" as const
+      },
+      {
+        label: "Verification",
+        detail: "Tests, review packet, CI, and delivery report validate the patch.",
+        tone: "success" as const
+      },
+      {
+        label: "Safety",
+        detail: "Remote mutation remains behind guarded automation policy.",
+        tone: "neutral" as const
+      }
+    ]
+  };
+}
+
+function slugForBranch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._/-]+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^-+|-+$/g, "")
+    .replace(/\/$/g, "") || "mission-handoff";
 }
 
 function formatTime(value: string): string {

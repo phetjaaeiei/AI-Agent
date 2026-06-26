@@ -1,10 +1,20 @@
-import { restoreRuntimeArtifactContents, restoreRuntimeSessionSnapshot } from "../../../packages/workflow/src/index.js";
-import type { RuntimeArtifactContent, RuntimeSessionSnapshot } from "../../../packages/workflow/src/index.js";
+import {
+  isMissionHistoryRecord,
+  restoreRuntimeArtifactContents,
+  restoreRuntimeSessionSnapshot
+} from "../../../packages/workflow/src/index.js";
+import type {
+  MissionHistoryRecord,
+  MissionHistorySummary,
+  RuntimeArtifactContent,
+  RuntimeSessionSnapshot
+} from "../../../packages/workflow/src/index.js";
 import type {
   AgentRunEvent,
   AgentRunRecord,
   AgentRuntimeInfo,
   AgentRuntimeMode,
+  AutomationPolicySnapshot,
   GitOperationRecord,
   GitOperationRequest,
   GitPolicySnapshot,
@@ -87,6 +97,10 @@ export async function fetchGitPolicy(): Promise<GitPolicySnapshot> {
   return validateGitPolicy(await requestJson<unknown>("/api/mission/git-policy"));
 }
 
+export async function fetchAutomationPolicy(): Promise<AutomationPolicySnapshot> {
+  return validateAutomationPolicy(await requestJson<unknown>("/api/mission/automation-policy"));
+}
+
 export async function fetchGitOperations(missionId: string): Promise<GitOperationRecord[]> {
   const payload = await requestJson<unknown>(`/api/mission/git-operations?missionId=${encodeURIComponent(missionId)}`);
   return Array.isArray(payload) ? payload.filter(isGitOperationRecord) : [];
@@ -96,7 +110,7 @@ export async function startGitOperation(input: GitOperationRequest): Promise<Git
   const payload = await requestJson<unknown>("/api/mission/git-operations", {
     method: "POST",
     body: JSON.stringify(input)
-  });
+  }, 15_000);
   if (!isGitOperationRecord(payload)) throw new Error("Git operation response is invalid.");
   return payload;
 }
@@ -129,6 +143,17 @@ export async function createDeliveryPacket(packetId: string): Promise<ReviewPack
 export async function fetchMissionControllers(missionId: string): Promise<MissionControllerRecord[]> {
   const payload = await requestJson<unknown>(`/api/mission/controllers?missionId=${encodeURIComponent(missionId)}`);
   return Array.isArray(payload) ? payload.filter(isMissionControllerRecord) : [];
+}
+
+export async function fetchMissionHistory(): Promise<MissionHistorySummary[]> {
+  const payload = await requestJson<unknown>("/api/mission/history");
+  return Array.isArray(payload) ? payload.filter(isMissionHistorySummary) : [];
+}
+
+export async function fetchMissionHistoryRecord(historyId: string): Promise<MissionHistoryRecord> {
+  const payload = await requestJson<unknown>(`/api/mission/history/${encodeURIComponent(historyId)}`);
+  if (!isMissionHistoryRecord(payload)) throw new Error("Mission history response is invalid.");
+  return payload;
 }
 
 export async function fetchMissionController(controllerId: string): Promise<MissionControllerRecord> {
@@ -349,6 +374,20 @@ function isMissionControllerRecord(value: unknown): value is MissionControllerRe
   return controller.schemaVersion === 1 && typeof controller.id === "string" && typeof controller.missionId === "string" && typeof controller.status === "string" && Array.isArray(controller.stageResults);
 }
 
+function isMissionHistorySummary(value: unknown): value is MissionHistorySummary {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as Partial<MissionHistorySummary>;
+  return (
+    typeof summary.id === "string" &&
+    (summary.kind === "current" || summary.kind === "archived") &&
+    typeof summary.missionId === "string" &&
+    typeof summary.title === "string" &&
+    typeof summary.status === "string" &&
+    typeof summary.agentRunCount === "number" &&
+    typeof summary.updatedAt === "string"
+  );
+}
+
 function isAgentRunEvent(value: unknown): value is AgentRunEvent {
   if (!value || typeof value !== "object") return false;
   const event = value as Partial<AgentRunEvent>;
@@ -388,12 +427,29 @@ function validateGitPolicy(value: unknown): GitPolicySnapshot {
     typeof policy.workspaceRoot !== "string" ||
     !Array.isArray(policy.allowedWorkspaceRoots) ||
     typeof policy.allowGitRead !== "boolean" ||
+    typeof policy.allowRemoteRead !== "boolean" ||
     typeof policy.allowGitCommit !== "boolean" ||
+    typeof policy.allowRemotePush !== "boolean" ||
     typeof policy.allowPullRequestCreate !== "boolean"
   ) {
     throw new Error("Git policy response is missing required fields.");
   }
   return policy as GitPolicySnapshot;
+}
+
+function validateAutomationPolicy(value: unknown): AutomationPolicySnapshot {
+  if (!value || typeof value !== "object") throw new Error("Automation policy response is invalid.");
+  const policy = value as Partial<AutomationPolicySnapshot>;
+  if (
+    policy.schemaVersion !== 1 ||
+    typeof policy.policyVersion !== "string" ||
+    typeof policy.generatedAt !== "string" ||
+    typeof policy.boundedLoopMaxAttempts !== "number" ||
+    !Array.isArray(policy.actions)
+  ) {
+    throw new Error("Automation policy response is missing required fields.");
+  }
+  return policy as AutomationPolicySnapshot;
 }
 
 function trimTrailingSlash(value: string): string {

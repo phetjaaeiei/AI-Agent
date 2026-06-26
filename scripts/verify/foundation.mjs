@@ -1,4 +1,7 @@
 import {
+  createDefaultImplementationPatchPolicySnapshot,
+  evaluateImplementationPatchTarget,
+  implementationSurfaceTargetPath,
   ROLE_IDS,
   OPERATIONAL_MISSION_PHASES
 } from "../../dist/packages/shared/src/index.js";
@@ -18,13 +21,17 @@ import {
   calculateAccuracyScore,
   calculateMissionAgentWorkloads,
   calculateMissionRoomWorkloads,
+  createAssumptionsFromDraft,
+  createMissionHistorySummary,
   createRuntimeArtifactRecord,
   createRuntimeAuditEvent,
   createRuntimeSessionSnapshot,
   createTaskRunMap,
+  formatAssumptionDraft,
   getRaciForPhase,
   parseMissionCommand,
   passesQualityGate,
+  restoreMissionHistoryStoreSnapshot,
   restoreRuntimeSessionSnapshot
 } from "../../dist/packages/workflow/src/index.js";
 
@@ -173,6 +180,42 @@ assert(parsedCommand.recommendedRoleIds.includes("frontend_developer"), "Mission
 assert(parsedCommand.recommendedRoleIds.includes("backend_developer"), "Mission command parser should recommend backend developer.");
 assert(parsedCommand.recommendedRoleIds.includes("automation_qa"), "Mission command parser should recommend automation QA.");
 assert(parsedCommand.recommendedRoleIds.includes("devops_lead"), "Mission command parser should recommend DevOps lead.");
+
+const implementationPatchPolicy = createDefaultImplementationPatchPolicySnapshot();
+const dashboardSurfacePath = implementationSurfaceTargetPath("dashboard");
+const allowedImplementationTarget = evaluateImplementationPatchTarget(implementationPatchPolicy, {
+  targetPath: dashboardSurfacePath,
+  content: "export const dashboardSurfaceReady = true;\n"
+});
+const deniedImplementationTarget = evaluateImplementationPatchTarget(implementationPatchPolicy, {
+  targetPath: "apps/web/src/App.tsx",
+  content: "export const outsideAllowlist = true;\n"
+});
+const extensionPolicyFixture = {
+  ...implementationPatchPolicy,
+  allowedTargets: [
+    ...implementationPatchPolicy.allowedTargets,
+    {
+      id: "implementation-dashboard-json-fixture",
+      kind: "surface_module",
+      path: "apps/web/src/generated/implementation-surfaces/dashboard-surface.json",
+      fileType: "typescript",
+      ownerRoleId: "frontend_developer",
+      purpose: "Extension denial fixture.",
+      surfaceKind: "dashboard",
+      maxBytes: 64_000
+    }
+  ]
+};
+const deniedExtensionTarget = evaluateImplementationPatchTarget(extensionPolicyFixture, {
+  targetPath: "apps/web/src/generated/implementation-surfaces/dashboard-surface.json",
+  content: "{}"
+});
+assert(implementationPatchPolicy.allowedTargets.length === 4, "Implementation patch policy should expose the manifest plus three surface targets.");
+assert(implementationPatchPolicy.maxTargetsPerRun === 2, "Implementation patch policy should allow only two targets per controller run.");
+assert(allowedImplementationTarget.allowed, "Dashboard surface target should be allowed by implementation patch policy.");
+assert(!deniedImplementationTarget.allowed, "Implementation patch policy should deny paths outside the allowlist.");
+assert(!deniedExtensionTarget.allowed, "Implementation patch policy should deny non-TypeScript generated targets.");
 
 const runtimeTasks = [
   {
@@ -337,9 +380,16 @@ const auditEvent = createRuntimeAuditEvent({
   entityId: "task-a",
   createdAt: "2026-06-18T10:11:00.000Z"
 });
+const missionAssumptions = createAssumptionsFromDraft({
+  missionId: "mission-runtime-test",
+  draft: "Repository main branch is the implementation baseline.\nStaging credentials are configured outside the session.",
+  createdAt: "2026-06-18T10:11:30.000Z"
+});
 const runtimeSnapshot = createRuntimeSessionSnapshot({
   missionId: "mission-runtime-test",
   commandDraft: parsedCommand.rawCommand,
+  assumptionDraft: formatAssumptionDraft(missionAssumptions),
+  missionAssumptions,
   missionPlan: parsedCommand,
   runtime: {
     gateRuns: advancedRuntime.gateRuns,
@@ -359,11 +409,45 @@ const runtimeSnapshot = createRuntimeSessionSnapshot({
   savedAt: "2026-06-18T10:12:00.000Z"
 });
 const restoredSnapshot = restoreRuntimeSessionSnapshot(JSON.parse(JSON.stringify(runtimeSnapshot)), runtimeSnapshot);
+const legacySnapshot = JSON.parse(JSON.stringify(runtimeSnapshot));
+delete legacySnapshot.assumptionDraft;
+delete legacySnapshot.missionAssumptions;
+const restoredLegacySnapshot = restoreRuntimeSessionSnapshot(legacySnapshot, runtimeSnapshot);
 const rejectedSnapshot = restoreRuntimeSessionSnapshot({ schemaVersion: 999 }, runtimeSnapshot);
 assert(restoredSnapshot.ok, "Runtime session snapshot should restore when schema is valid.");
 assert(restoredSnapshot.snapshot.auditEvents.length === 1, "Runtime session snapshot should preserve audit events.");
 assert(restoredSnapshot.snapshot.artifactRecords.length === 1, "Runtime session snapshot should preserve artifact records.");
+assert(restoredSnapshot.snapshot.missionAssumptions.length === 2, "Runtime session snapshot should preserve mission assumptions.");
+assert(restoredSnapshot.snapshot.assumptionDraft.includes("Staging credentials"), "Runtime session snapshot should preserve assumption draft text.");
+assert(restoredLegacySnapshot.ok, "Runtime session snapshot should restore legacy snapshots without assumptions.");
+assert(restoredLegacySnapshot.snapshot.missionAssumptions.length === 0, "Legacy runtime snapshots should recover with an empty assumption log.");
 assert(!rejectedSnapshot.ok, "Runtime session snapshot should reject unsupported schema.");
+
+const missionHistoryRecord = {
+  schemaVersion: 1,
+  id: "history-mission-runtime-test-session",
+  kind: "archived",
+  missionId: runtimeSnapshot.missionId,
+  title: runtimeSnapshot.missionState.title,
+  command: runtimeSnapshot.commandDraft,
+  status: "saved",
+  archiveReason: "mission_reset",
+  session: runtimeSnapshot,
+  agentRuns: [],
+  agentRunEvents: [],
+  toolCalls: [],
+  gitOperations: [],
+  reviewPackets: [],
+  artifactContents: [],
+  createdAt: runtimeSnapshot.missionState.createdAt,
+  updatedAt: runtimeSnapshot.savedAt,
+  archivedAt: runtimeSnapshot.savedAt
+};
+const restoredHistory = restoreMissionHistoryStoreSnapshot({ schemaVersion: 1, records: [missionHistoryRecord, { schemaVersion: 999 }] });
+const historySummary = createMissionHistorySummary(restoredHistory.records[0]);
+assert(restoredHistory.records.length === 1, "Mission history restore should reject malformed archive records.");
+assert(historySummary.kind === "archived" && historySummary.status === "saved", "Mission history summary should preserve archive state.");
+assert(historySummary.artifactCount === 0, "Mission history summary should expose bounded evidence counts.");
 
 if (failures.length > 0) {
   console.error("Foundation verification failed:");
@@ -380,4 +464,4 @@ console.log(`Quality gates: ${QUALITY_GATES.length}`);
 console.log(`Mission benchmarks: ${MISSION_BENCHMARKS.length}`);
 console.log(`Agent model routing profiles: ${Object.keys(AGENT_MODEL_ROUTING).length}`);
 console.log(`Runtime parser capabilities: ${parsedCommand.detectedCapabilities.length}`);
-console.log(`Runtime persisted records: ${runtimeSnapshot.artifactRecords.length + runtimeSnapshot.auditEvents.length}`);
+console.log(`Runtime persisted records: ${runtimeSnapshot.artifactRecords.length + runtimeSnapshot.auditEvents.length + runtimeSnapshot.missionAssumptions.length}`);

@@ -283,6 +283,43 @@
 - Configured `origin` as `https://github.com/phetjaaeiei/AI-Agent.git`.
 - Verified GitHub CLI authentication and repository admin/push permission.
 - Published all 86 tracked project files in initial commit `5baa152` and configured `main` to track `origin/main`.
+- Continued Phase 7 GitHub Repository Integration with read-only remote health.
+- Added `remote_health` as a policy-controlled Git operation kind.
+- Added Git remote health contracts for provider, repository label, sanitized remote URL, default branch, local branch, local/remote HEAD SHA, upstream tracking, ahead/behind counts, access state, and best-effort GitHub auth metadata.
+- Added `allowRemoteRead` to the Git policy snapshot, enabled by default and disabled with `TEAM_AI_AGENT_ALLOW_GIT_REMOTE_READ=false`.
+- Implemented remote health in `LocalGitRunner` using `git ls-remote` and upstream status checks through `spawn` with `shell: false`; GitHub CLI checks are best-effort and never persist credentials.
+- Persisted remote health as Git operation audit/activity evidence and a `Remote Health Evidence` artifact.
+- Added Mission Control UI for `Check remote`, remote read policy state, reachable/blocked remote status, repository label, and branch/default branch facts.
+- Extended the frontend Git operation request timeout so slower remote-read checks can update Mission Control instead of timing out while the server finishes successfully.
+- Updated deterministic Git runner and orchestrator verification fixtures with local bare remotes so remote-read coverage does not require network access.
+- Updated [GIT_INTEGRATION.md](./GIT_INTEGRATION.md) and [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md) for the completed G1 remote-read slice.
+- Continued Phase 7 GitHub Repository Integration with G2 remote mutation policy preflight.
+- Added `branch_push_policy` and `draft_pr_policy` as read-only Git operation kinds.
+- Added remote mutation policy contracts for mutation kind, allow/deny decision, actor, target branch, commit SHA, remote target, base branch, permission state, explicit reviewed delivery evidence, disabled force-push/branch-deletion states, blockers, and checked time.
+- Added branch policy enforcement for future remote mutations:
+  - branch names must target `codex/*`;
+  - protected base branches such as `main` and `master` are blocked;
+  - denied path changes remain blocked;
+  - uncommitted worktree changes block remote mutation because the policy must target a committed SHA.
+- Git operation service now optionally receives the review packet store and requires an explicit `reviewPacketId` whose packet status is `delivered` and has delivery artifact content before a future remote mutation can pass.
+- Mission Control Git Integration now exposes `Check push` and `Check PR policy` actions plus a compact latest remote mutation policy summary.
+- Added deterministic policy coverage for disabled branch push, disabled PR creation, explicit review packet requirements, delivered review packet recognition, force-push disabled state, branch-deletion disabled state, and artifact creation.
+- Continued Phase 7 GitHub Repository Integration with G3 draft pull request connector work.
+- Added `branch_push` and `draft_pr_create` as policy-controlled Git operation kinds.
+- Added branch-push and draft-PR result contracts that record branch, remote, commit SHA, tracking branch, draft PR URL, PR number, base/head branches, and draft-only state without storing credentials.
+- Actual remote mutation operations are blocked before execution unless an explicit delivered review packet from the same mission/task is present.
+- Branch push now requires a clean current `codex/*` branch, reachable `origin`, matching target branch, enabled remote push permission, no denied path changes, and no uncommitted work.
+- Draft PR creation now requires enabled PR creation permission, a previously pushed remote branch whose SHA matches local HEAD, and uses `gh pr create --draft`.
+- Draft PR bodies are hydrated from the reviewed delivery artifact Markdown and include remote safety notes for manual merge, disabled force push, disabled branch deletion, and disabled deployment.
+- Mission Control now exposes disabled-by-default `Push branch` and `Create draft PR` actions while showing separate remote push and PR creation policy facts.
+- Added deterministic connector coverage with a local bare `origin` for branch push and a fake `gh` executable for draft PR creation, so tests do not contact GitHub.
+- Continued Phase 7 GitHub Repository Integration with G4 Mission Control remote evidence.
+- Added `remote_evidence` as a read-only Git operation kind.
+- Added remote publication evidence contracts for repository, branch, local commit, remote commit, publication state, PR state, check summary, blocked actions, retryability, and retry reason.
+- `remote_evidence` distinguishes `local_only`, `published_current`, `published_stale`, and `unknown` without mutating the remote.
+- GitHub PR and status check evidence are best-effort through `gh pr view`; missing PRs are reported as `none`, and network/auth/parse failures return retryable evidence instead of repeating commits or remote mutations.
+- Mission Control now exposes `Check evidence` / `Retry evidence` and shows publication state, PR status, checks state, retry reason, and still-blocked merge/deploy/force-push/branch-deletion actions.
+- Updated deterministic fixtures to cover local remote publication evidence and fake GitHub PR/check evidence using a Git `insteadOf` rewrite to a local bare remote.
 
 ### Verification
 
@@ -299,6 +336,116 @@
 - `npm run verify:mission-controller`: passed complete, policy block, retry limit, CI failure, reviewer revision, cancellation, restart recovery, idempotency, delivery, and reset paths.
 - `npm run verify:orchestrator`: now also covers controller start/list/detail/cancel endpoints and reset clearing controller history.
 - `npm run build:web`: passed without browser-externalized Node module warnings.
+- `npm run typecheck`: passed after Phase 7 remote-read health changes.
+- `npm run verify:git-runner`: passed with 6 default-policy operations, including deterministic `remote_health` against a local bare `origin`, and 5 Git artifacts.
+- `npm run verify:orchestrator`: passed with remote-health HTTP coverage, artifact creation, and Git operation reset coverage.
+- `npm run build:web`: passed after adding the Mission Control `Check remote` UI.
+- `npm run typecheck`: passed after Phase 7 G2 remote mutation policy changes.
+- `npm run verify:git-runner`: passed with 8 default-policy operations, including `branch_push_policy` and `draft_pr_policy`, and 7 Git artifacts.
+- `npm run verify:orchestrator`: passed with branch-push and draft-PR policy HTTP coverage.
+- `npm run verify:review-packet`: passed with delivered review packet recognition in branch-push policy preflight.
+- `npm run build:web`: passed after adding Mission Control remote policy actions.
+- `npm run typecheck`: passed after Phase 7 G3 branch-push and draft-PR connector changes.
+- `npm run verify:git-runner`: passed with 10 default-policy operations, including default blocks for `branch_push` and `draft_pr_create`, and 7 Git artifacts.
+- `npm run verify:orchestrator`: passed with HTTP coverage for default-blocked `branch_push` and `draft_pr_create`.
+- `npm run verify:review-packet`: passed with enabled branch push to a local bare origin and fake-`gh` draft PR creation using reviewed delivery Markdown.
+- `npm run typecheck`: passed after Phase 7 G4 remote evidence changes.
+- `npm run verify:git-runner`: passed with 11 default-policy operations, including `remote_evidence`, and 8 Git artifacts.
+- `npm run verify:orchestrator`: passed with HTTP coverage for `remote_evidence` artifact creation and blocked remote actions.
+- `npm run verify:review-packet`: passed with fake GitHub PR/check evidence after enabled branch push and fake draft PR creation.
+- `npm run verify:foundation`: passed after Phase 7 G4 changes.
+- `npm run verify:agent-runtime`: passed after Phase 7 G4 changes.
+- `npm run verify:tool-runner`: passed after Phase 7 G4 changes.
+- `npm run verify:mission-controller`: passed after Phase 7 G4 changes.
+- `npm run build:web`: passed after adding Mission Control branch-push/draft-PR connector actions and an inline favicon.
+- `git diff --check`: passed after Phase 7 G3 changes.
+- `npm run build:web`: passed after Phase 7 G4 remote evidence UI changes.
+- `git diff --check`: passed after Phase 7 G4 changes.
+- Phase 7 remote evidence rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
+  - Git Integration card showed `Check evidence`, `Remote push off`, and `PR draft only`;
+  - desktop `Check evidence` completed as a read-only operation and showed a remote publication evidence panel with publication state plus merge/deploy/force-push/branch-deletion blocked state or retry guidance;
+  - console errors/warnings: none;
+  - failed network responses: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-evidence-desktop.png` and `/tmp/team-ai-agent-remote-evidence-mobile.png`.
+- Phase 7 branch publication completed:
+  - branch `codex/phase-7-remote-mutation-policy` was pushed to `origin`;
+  - commit `c23cc0e` was published;
+  - draft PR #1 was created at `https://github.com/phetjaaeiei/AI-Agent/pull/1`;
+  - PR #1 is open, draft, and targets `main`;
+  - merge state is `CLEAN`;
+  - no merge, deployment, production action, force push, branch deletion, or destructive Git action was performed.
+- Opened Phase 8 Real Mission Execution planning:
+  - added [PHASE_8_REAL_MISSION_EXECUTION.md](./PHASE_8_REAL_MISSION_EXECUTION.md);
+  - updated [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md) to Phase 8;
+  - first implementation target is H1 Mission Intake And Session Source Of Truth.
+- Started Phase 8 H1 Mission Intake And Session Source Of Truth:
+  - added a durable `missionState` lifecycle to runtime session snapshots with `draft`, `saved`, `running`, `blocked`, and `delivered` states;
+  - restored old browser/server snapshots by deriving `missionState` when the field is missing;
+  - command edits now update the parsed mission plan and mark the current intake as a local draft;
+  - mission controller, agent runtime, one-step orchestrator advance, and review delivery writes now update lifecycle state through the shared runtime helper;
+  - command dock now shows the mission lifecycle badge alongside server and runtime provider status.
+- Phase 8 H1 lifecycle verification:
+  - `npm run typecheck`, `verify:foundation`, `verify:orchestrator`, `verify:agent-runtime`, `verify:tool-runner`, `verify:git-runner`, `verify:review-packet`, `verify:mission-controller`, `build:web`, and `git diff --check` passed;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed server-connected load, Saved -> Draft lifecycle transition after command edit, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-mission-intake-desktop.png`, `/tmp/team-ai-agent-h1-mission-intake-mobile.png`, and `/tmp/team-ai-agent-h1-mission-intake-mobile-dock.png`.
+- Extended Phase 8 H1 Mission Intake:
+  - added an inline mission intake panel above Mission Control with editable mission command, parsed capability/risk/setup chips, Save mission, and Reset draft;
+  - Save mission writes the current runtime session through `PUT /api/mission/session` and falls back to browser memory when the orchestrator is unavailable;
+  - save actions add a `mission_saved` audit event and update the last saved command used by Reset draft;
+  - top HUD and HQ subtitle now use the persisted mission title and parsed mission metrics instead of static benchmark labels;
+  - bottom dock now acts as a mission execution summary and activity feed rather than a duplicate command editor.
+- Phase 8 H1 inline intake verification:
+  - `npm run typecheck`, `npm run verify:orchestrator`, `npm run build:web`, and `git diff --check` passed;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed initial Saved state, edit -> Draft, Save mission -> Saved, Save/Reset disabled after save, reload persistence, Reset draft restoring the last saved command, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-intake-save-desktop.png` and `/tmp/team-ai-agent-h1-intake-save-mobile.png`.
+- Completed the first-class assumptions portion of Phase 8 H1:
+  - runtime snapshots now persist `assumptionDraft` and typed `missionAssumptions`;
+  - snapshot restore remains backward-compatible with sessions created before assumption fields existed;
+  - line-based assumption drafts are trimmed, deduplicated, bounded to 12 records, and preserve existing record metadata when text is unchanged;
+  - Mission Intake edits command and assumptions together, marks local edits as Draft, and saves both through the orchestrator or browser fallback;
+  - Reset draft restores assumptions from the last saved records;
+  - Mission Inspector now renders the saved assumption log and a clear empty state instead of the static benchmark assumption;
+  - orchestrator autopilot and every service path that spreads the current session preserve the assumption source of truth.
+- Phase 8 H1 assumptions verification:
+  - `npm run typecheck`, `verify:foundation`, `verify:orchestrator`, `verify:agent-runtime`, `verify:tool-runner`, `verify:git-runner`, `verify:review-packet`, `verify:mission-controller`, `build:web`, and `git diff --check` passed;
+  - foundation verification covers assumption draft formatting, typed record persistence, and legacy snapshot restore;
+  - orchestrator verification covers default assumptions, autopilot preservation, PUT persistence, and reset restoration;
+  - rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`;
+  - rendered QA at `1440x900` and `390x844` confirmed Saved -> Draft after assumption edits, two-record save, disabled Save/Reset after save, inspector updates, reload persistence, Reset draft restoration, no console errors, no failed requests, and no horizontal overflow;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-h1-assumptions-desktop.png` and `/tmp/team-ai-agent-h1-assumptions-mobile.png`.
+- Phase 7 draft pull request connector rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - the Playwright packaged browser binary was missing, so installed Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` was used;
+  - Git Integration card showed `Remote push off`, `PR draft only`, disabled `Push branch`, and disabled `Create draft PR`;
+  - desktop `Check push` and `Check PR policy` completed as non-mutating policy checks and showed `Remote policy blocked` plus `Delivery required`;
+  - console errors/warnings: none;
+  - failed network responses: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-draft-pr-connector-desktop.png` and `/tmp/team-ai-agent-draft-pr-connector-mobile.png`.
+- Phase 7 remote mutation policy rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - `Check push` and `Check PR policy` both completed without mutating the remote;
+  - Git Integration card showed `Remote policy blocked`, `Delivery required`, `Force push off, deletion off`, and completed `Push policy` / `PR policy` rows;
+  - both policy operations recorded 3 blockers in the default local state;
+  - Artifact Memory included remote mutation policy evidence;
+  - console errors/warnings: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-policy-desktop.png` and `/tmp/team-ai-agent-remote-policy-mobile.png`;
+  - live orchestrator Git operation history was reset to `[]` after QA.
+- Phase 7 remote-health rendered QA via Playwright fallback passed at `1440x900` and `390x844`:
+  - Browser skill was available, but the in-app browser runtime returned `Browser is not available: iab`, so Playwright fallback was used;
+  - `Check remote` completed against `phetjaaeiei/AI-Agent`;
+  - Git Integration card showed `Remote ok`, `Remote read on`, `main -> main`, and a completed `Remote health` row;
+  - Artifact Memory included remote health evidence;
+  - console errors/warnings: none;
+  - horizontal overflow: none on desktop or mobile;
+  - screenshots saved outside the repo at `/tmp/team-ai-agent-remote-health-desktop.png` and `/tmp/team-ai-agent-remote-health-mobile.png`;
+  - live orchestrator state was reset to the default session after QA.
 - `npm run eval:agent-runtime`: 6 passed, 0 failed.
 - `npm run verify:ollama`: passed with `qwen3:8b`, structured planner/verifier output, persisted traces, and an agent-runtime artifact.
 - Live rendered Ollama run used 2 attempts and 5,275 local tokens, then correctly entered `blocked` at 81/100 because the verifier still requested revision after the configured limit.
@@ -334,7 +481,624 @@
   - screenshots saved at `/tmp/team-ai-agent-controller-desktop.png` and `/tmp/team-ai-agent-controller-mobile.png`.
 - In-app Browser was unavailable in the session, so rendered checks used the repo's Playwright dependency.
 
+### Phase 8 H2 Mission History And Run Recovery
+
+- Added versioned mission history record, summary, status, archive-reason, and store contracts.
+- Added a create-once file-backed mission history archive with 100-record retention.
+- Added a mission history aggregation service that captures the runtime session, controller, agent runs/events, tool calls, Git operations, review packets, CI results, artifacts, and delivery packet.
+- Terminal completed, blocked, failed, and cancelled controllers are archived automatically.
+- Retry archives the previous attempt before mutating the active controller, preserving attempt one and attempt two as separate records.
+- Mission reset archives the current state before clearing active run, tool, Git, review, artifact, and controller stores.
+- Added read-only `GET /api/mission/history` and `GET /api/mission/history/:historyId` endpoints; no history mutation or replay endpoint exists.
+- Added a compact Mission History strip and read-only recovery inspector for controller stages, agent runs, tool evidence, Git evidence, review/CI state, and delivery content.
+- Recovery mode replaces action-bearing inspector controls and returns to the current run from the Current history row.
+- Added [MISSION_HISTORY_AND_RECOVERY.md](./MISSION_HISTORY_AND_RECOVERY.md).
+- Full verification passed: `typecheck`, foundation, agent runtime, tool runner, Git runner, review packet, mission controller, orchestrator, web build, and `git diff --check`.
+- Orchestrator verification covers terminal capture, immutable reset behavior, separate retry attempts, evidence recovery after active stores reset, and current/archived list behavior.
+- Rendered QA used Playwright fallback because in-app Browser returned `Browser is not available: iab`.
+- Desktop `1440x900` and mobile `390x844` QA confirmed current/archived selection, GET-only recovery, read-only controls, no framework overlay, no console warnings/errors, no failed responses, no horizontal overflow, and no clipped recovery rows.
+- QA screenshots are outside the repository at `/tmp/team-ai-agent-h2-recovery-desktop.png`, `/tmp/team-ai-agent-h2-history-mobile.png`, and `/tmp/team-ai-agent-h2-recovery-mobile.png`.
+
+### Phase 8 H3 Real Evidence Inspector
+
+- Added a real-first Evidence Inspector card in Mission Control.
+- Evidence filtering now supports source filters for real, all, agent, tool, Git, review, server, and local evidence.
+- Evidence filtering now supports status filters for all, verified, reviewing, and draft artifact contents.
+- Artifact Memory now ranks non-seeded evidence ahead of seeded demo artifact content.
+- Artifact Memory now exposes a collapsible Markdown report preview with bounded scrolling for dense reports.
+- Added an Ollama Auto Learning card that auto-captures local evidence as learning candidates.
+- Ollama learning candidates remain local and policy-visible; fine-tuning, adapter creation, active model replacement, and silent model mutation remain disabled until a dedicated training policy exists.
+- Updated [NEXT_IMPLEMENTATION_PLAN.md](./NEXT_IMPLEMENTATION_PLAN.md), [PHASE_8_REAL_MISSION_EXECUTION.md](./PHASE_8_REAL_MISSION_EXECUTION.md), and [OLLAMA_AGENT_RUNTIME.md](./OLLAMA_AGENT_RUNTIME.md) with the H3 evidence inspector and learning-queue boundary.
+- Verification passed: `npm run typecheck`, `npm run verify:foundation`, `npm run build:web`, and `git diff --check`.
+- Rendered QA used Playwright fallback because the in-app Browser returned `Browser is not available: iab`.
+- Desktop `1440x900` and mobile `390x844` QA confirmed Evidence Inspector, Ollama Auto Learning, and Artifact Memory cards render without horizontal overflow.
+- QA confirmed source/status filters work, Git evidence filters to 5 rows in the current persisted mission, Real is selected by default, Markdown report expands, and no console errors or failed network responses occur when using the current orchestrator on port `8788`.
+- QA screenshots are outside the repository at `/tmp/team-ai-agent-h3-evidence-desktop.png` and `/tmp/team-ai-agent-h3-evidence-mobile.png`.
+- Added a `Command Output` inspector card that combines recent tool and Git command evidence into clipped, redacted summaries.
+- Command output redaction masks the workspace root, denied path patterns, bearer tokens, OpenAI-style API keys, and secret-like `key=value` fields before display.
+- Rendered QA created a blocked `.env` read and passing `npm run typecheck` command in a temporary orchestrator store; Mission Control showed `[denied path]`, did not show `.env`, and displayed the typecheck output summary.
+- Additional rendered QA passed at desktop `1440x900` and mobile `390x844` with no console errors, no failed network responses, no horizontal overflow, 2 command rows, and `2 redacted` in the command output card.
+- QA screenshots are outside the repository at `/tmp/team-ai-agent-h3-command-output-desktop.png` and `/tmp/team-ai-agent-h3-command-output-mobile.png`.
+
+### Phase 8 H4 End-To-End Mission QA
+
+- Added `scripts/verify/phase8-e2e.mjs` and `npm run verify:phase8-e2e`.
+- Added `scripts/verify/phase8-rendered-qa.mjs` and `npm run verify:phase8-rendered`.
+- The H4 deterministic verification starts a temporary orchestrator HTTP server with file-backed stores and a temporary Git repository.
+- The test saves a user-entered mission through `PUT /api/mission/session`, then starts the autonomous controller through `POST /api/mission/controllers`.
+- The controller happy path now verifies all eight stages: planning, tool evidence, Git evidence, review packet, local CI, reviewers, delivery, and handoff policy.
+- Tool evidence remains deterministic through a fixture test-command runner while still using the real tool-runner policy evaluation.
+- Git evidence uses the real local Git runner on a safe temp repository and verifies only read/preflight evidence: `status`, `diff`, `commit_plan`, `remote_evidence`, `branch_push_policy`, and `draft_pr_policy`.
+- The verification asserts that no local commit, branch push, or draft PR creation occurs in the happy path or recovered history.
+- Review packet assertions cover default local CI, three required reviewer approvals, delivered status, and delivery artifact linkage.
+- Delivery artifact assertions cover review-service source, `## Verification`, `Remote push disabled`, and `Deploy disabled` safety notes.
+- Mission history assertions cover delivered archive creation, full evidence recovery, reset clearing of active stores, and archived run recovery after reset.
+- Verification passed: `npm run verify:phase8-e2e` with 8 controller stages and 7 CI commands.
+- Rendered QA starts temporary complete and blocked orchestrator fixtures plus a temporary Vite server, then verifies Mission Control through Playwright.
+- Browser-first QA was attempted, but the in-app Browser returned `Browser is not available: iab`; Playwright fallback was used.
+- Rendered QA passed for mission intake, delivered mission, recovered mission, and blocked mission states at desktop `1440x900` and mobile `390x844`.
+- Rendered QA confirmed no console errors, no page errors, no failed network responses, and no horizontal overflow.
+- QA screenshots are outside the repository at `/tmp/team-ai-agent-h4-intake-desktop.png`, `/tmp/team-ai-agent-h4-intake-mobile.png`, `/tmp/team-ai-agent-h4-delivered-desktop.png`, `/tmp/team-ai-agent-h4-delivered-mobile.png`, `/tmp/team-ai-agent-h4-recovery-desktop.png`, `/tmp/team-ai-agent-h4-recovery-mobile.png`, `/tmp/team-ai-agent-h4-blocked-desktop.png`, and `/tmp/team-ai-agent-h4-blocked-mobile.png`.
+- Verification passed: `npm run verify:phase8-rendered`.
+
+### Phase 8 H5 Hardening
+
+- Added inline hardening guidance in Mission Control.
+- Local Agent Runtime now explains when Ollama is unavailable and what deterministic fallback means.
+- Mission Controller now explains stop reasons and bounded retry behavior without implying commits, pushes, PR creation, merge, or deployment will be repeated.
+- Git Integration now explains denied path changes, disabled Git read policy, GitHub auth gaps, stale remote evidence, blocked remote mutation policy, and blocked mutation attempts.
+- Review Packet now explains CI failures, denied path blockers, generic blocked requirements, and delivered human handoff readiness.
+- Added [PHASE_8_HARDENING_AND_HANDOFF.md](./PHASE_8_HARDENING_AND_HANDOFF.md).
+- Rendered QA now asserts delivered and blocked hardening guidance appears in Mission Control.
+- Verification passed: `npm run typecheck`, `npm run build:web`, `npm run verify:phase8-e2e`, `npm run verify:phase8-rendered`, and `git diff --check`.
+
+### Post-H5 UI Concept Refresh And Folder Organization
+
+- Refreshed the Mission Control UI toward the Pixel War Room concept:
+  - added a dark tactical signal band for runtime, controller, evidence, and handoff readiness;
+  - reused live app state for all four signal cards rather than static display text;
+  - strengthened the left navigation and brand mark with pixel-grid command-room styling;
+  - kept deterministic fallback, local Ollama state, and remote mutation policy visible.
+- Organized frontend folders:
+  - moved shared stylesheet entry to `apps/web/src/styles/app.css`;
+  - added `apps/web/src/components/layout/LeftNav.tsx`;
+  - added `apps/web/src/components/primitives/HardeningGuidanceList.tsx`;
+  - added `apps/web/src/components/concept/WarRoomSignalPanel.tsx`;
+  - updated `apps/web/src/main.tsx` to import the organized style entry.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+- Rendered QA:
+  - Browser-first QA was attempted, but browser runtime bootstrap failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+  - Desktop `1440x960` QA confirmed page identity, meaningful content, signal panel visibility, four signal tiles, no framework overlay, and Save mission interaction.
+  - Mobile `390x844` QA confirmed signal panel visibility, four signal tiles, and responsive stacking without horizontal clipping.
+  - Standalone Vite dev-server QA produced expected `ERR_CONNECTION_REFUSED` console entries because the orchestrator service was not running; the app stayed in deterministic local fallback and rendered successfully.
+  - The full `verify:phase8-rendered` suite ran against its own temporary orchestrator fixtures and passed.
+  - QA screenshots are outside the repository at `/tmp/team-ai-agent-ui-refresh-desktop.png`, `/tmp/team-ai-agent-ui-refresh-mobile.png`, and `/tmp/team-ai-agent-ui-refresh-mobile-signal.png`.
+
+### Post-H5 Mission Component Extraction Pass
+
+- Continued frontend folder organization after the UI concept refresh:
+  - added `apps/web/src/components/mission/TopHud.tsx`;
+  - added `apps/web/src/components/mission/MissionIntakePanel.tsx`;
+  - added `apps/web/src/components/mission/MissionHistoryPanel.tsx`;
+  - added `apps/web/src/utils/mission-labels.ts`;
+  - added `apps/web/src/utils/time-format.ts`;
+  - kept `App.tsx` focused more on orchestration state, service calls, and high-level layout composition.
+- Preserved behavior while extracting:
+  - Top HUD metrics still derive from the parsed mission plan;
+  - Mission Intake still handles command/assumption editing, Save mission, Reset draft, and draft-state gating;
+  - Mission History still shows current/archive rows and read-only recovery selection.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Post-H5 Recovery Component Extraction Pass
+
+- Continued frontend component extraction:
+  - added `apps/web/src/components/mission/MissionRecoveryInspector.tsx`;
+  - added `apps/web/src/utils/role-labels.ts`;
+  - added `apps/web/src/utils/operation-labels.ts`;
+  - moved role-name, short-role, department fallback, tool-call label, Git-operation label, and Git-operation summary helpers out of `App.tsx`;
+  - kept recovery mode read-only and preserved the existing archived mission evidence path.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Post-H5 Bottom Dock Extraction Pass
+
+- Continued frontend component extraction:
+  - added `apps/web/src/components/mission/BottomDock.tsx`;
+  - moved the mission execution summary, runtime/server status chips, Run local agents submit button, activity filter buttons, and activity feed rows out of `App.tsx`;
+  - kept `ActivityEvent` and `ActivityFilter` typed with the bottom dock component so Mission Control state still uses the same activity contract;
+  - preserved existing local-agent run, activity-filter, mission-state, server-status, runtime-provider, saved-time, artifact-count, and audit-count display behavior.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Post-H5 Task Graph And Artifact Memory Extraction Pass
+
+- Continued frontend component extraction:
+  - added `apps/web/src/components/mission/TaskGraphCard.tsx`;
+  - added `apps/web/src/components/mission/ArtifactMemoryCard.tsx`;
+  - added `apps/web/src/utils/artifact-content.ts`;
+  - moved task status labeling and task graph row rendering out of `App.tsx`;
+  - moved Artifact Memory rendering out of `App.tsx`;
+  - moved artifact source labeling plus seeded/real artifact helpers into a reusable utility used by Mission Control and extracted components.
+- Preserved behavior:
+  - task selection still drives route/gate/artifact context through `App.tsx`;
+  - Artifact Memory still shows empty state, source label, owner, summary, evidence sections, and Markdown report;
+  - real evidence counts and real-first artifact sorting still use the same seeded-content boundary.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Post-H5 Evidence Cards Extraction Pass
+
+- Continued frontend component extraction:
+  - added `apps/web/src/components/mission/EvidenceInspectorCard.tsx`;
+  - added `apps/web/src/components/mission/CommandOutputSummaryCard.tsx`;
+  - added `apps/web/src/components/mission/OllamaLearningCard.tsx`;
+  - moved evidence source/status filter controls and evidence rows out of `App.tsx`;
+  - moved safe command output summaries out of `App.tsx`;
+  - moved Ollama local learning candidate display out of `App.tsx`;
+  - kept `App.tsx` as the owner of evidence filter state, redacted command summaries, and learning-candidate derivation.
+- Preserved behavior:
+  - source/status filters still select the same artifact evidence;
+  - command output still shows clipped/redacted summaries with redaction counts;
+  - Ollama learning remains local-only with fine-tune policy pending;
+  - real-first artifact prioritization still uses the same seeded-content boundary.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Post-H5 Sidebar Layout Hardening
+
+- Fixed the left sidebar rail overflow regression:
+  - widened the desktop sidebar rail from `88px` to `112px`;
+  - widened the tablet rail from `72px` to `96px`;
+  - constrained `.left-nav`, `.left-nav nav`, and `.nav-item` with `min-width: 0`, `max-width: 100%`, and hidden horizontal overflow;
+  - added ellipsis behavior for long nav labels such as `Deployments`;
+  - fixed mission intake heading shrink behavior so long mission titles and status badges do not cause horizontal overflow near the `760px` breakpoint.
+- Rendered QA evidence:
+  - Browser-first validation was attempted, but the in-app Browser runtime failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+  - Manual Playwright layout checks at `900x1000`, `761x1000`, and `390x844` confirmed nav items no longer extend past `.left-nav`.
+  - Horizontal overflow was false at `900x1000`, `761x1000`, and `390x844` after the fix.
+  - Screenshots were saved outside the repository at `/tmp/team-ai-agent-sidebar-after2-narrow-desktop.png`, `/tmp/team-ai-agent-sidebar-after2-tablet-edge.png`, and `/tmp/team-ai-agent-sidebar-after2-mobile.png`.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Phase 9 Guarded Automation Policy Foundation
+
+- Started Phase 9 by converting the remaining manual/disabled safety list into shared automation policy contracts:
+  - added automation action kinds for planning, controller retries, local tools, Git reads, local commits, remote branch push, draft PR creation, merge, staging deploy, production deploy, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded loops;
+  - added automation modes: `auto`, `review_required`, `manual_only`, and `disabled`;
+  - added evidence requirements for policy switch, connector policy, reviewed delivery, passing local CI, reviewer approval, current remote branch evidence, draft PR evidence, rollback plan, staging smoke, production approval, bounded retry budget, and no-secret checks;
+  - added `createDefaultAutomationPolicySnapshot()` and `evaluateAutomationAction()` so future controller/UI code can explain whether an action can run automatically and which evidence is missing.
+- Exposed a read-only orchestrator endpoint:
+  - `GET /api/mission/automation-policy`;
+  - returns the active `phase9-guarded-automation-v1` policy snapshot;
+  - does not grant permissions or execute any action.
+- Added deterministic verification:
+  - `npm run verify:automation-policy`;
+  - asserts that hard-disabled actions never become automatic;
+  - asserts that branch push and draft PR creation require explicit evidence before bounded auto eligibility;
+  - asserts that merge and production deployment remain non-automatic;
+  - asserts that controller retry requires bounded retry budget evidence;
+  - verifies the read-only automation policy endpoint.
+- Documented the policy in [GUARDED_AUTOMATION_POLICY.md](./GUARDED_AUTOMATION_POLICY.md).
+
+### Phase 9 Mission Control Automation Surface
+
+- Added a read-only Automation Policy card to the Mission Control inspector:
+  - displays the active `phase9-guarded-automation-v1` policy snapshot;
+  - summarizes auto-ready, review-required, manual-only, and disabled action counts;
+  - shows tracked guarded actions including controller retry, branch push, draft PR creation, merge, staging deploy, production deploy, force push, branch deletion, secret serialization, silent fine-tuning, and unbounded loops;
+  - exposes the first missing evidence or blocker for each action without adding mutation buttons.
+- Connected the frontend to `GET /api/mission/automation-policy`:
+  - added `fetchAutomationPolicy()` and response validation to the orchestrator client;
+  - kept `createDefaultAutomationPolicySnapshot()` as the local fallback snapshot when the orchestrator is unavailable.
+- Added UI evidence derivation from existing mission state:
+  - reviewed delivery;
+  - passing local CI;
+  - reviewer approvals;
+  - current remote branch evidence;
+  - draft PR evidence;
+  - bounded retry budget;
+  - no denied-path Git changes;
+  - rollback-plan evidence from real artifacts.
+- Kept merge, production deployment, force push, branch deletion, destructive Git operations, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.
+- Extended rendered QA so the desktop, mobile, and blocked mission intake paths assert the Automation Policy card is visible and includes merge/manual plus force-push/disabled states.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:automation-policy`;
+  - `npm run verify:orchestrator`;
+  - `npm run verify:phase8-rendered`;
+  - `git diff --check`.
+
+### Phase 9 Controller Handoff Policy Gate
+
+- Wired controller completion through the guarded automation policy before any future automatic remote handoff:
+  - added `handoff_policy` as the final mission controller stage after delivery;
+  - added persisted `automationDecisions` to `MissionControllerRecord`;
+  - added `automation_handoff_started` and `automation_handoff_completed` audit actions;
+  - the controller now runs read-only `remote_evidence`, `branch_push_policy`, and `draft_pr_policy` after delivery;
+  - the controller evaluates branch push, draft PR creation, staging deploy, merge, production deploy, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded loop decisions through `evaluateAutomationAction()`;
+  - the controller records the handoff preflight as activity/audit evidence without pushing, creating PRs, merging, deploying, force-pushing, deleting branches, reading secrets, mutating models, or entering unbounded loops.
+- Updated Mission Control and recovery stage ordering to include `handoff_policy`.
+- Updated deterministic verification:
+  - `npm run verify:mission-controller` now covers the complete path with handoff policy decisions and read-only handoff Git evidence;
+  - `npm run verify:phase8-e2e` now verifies eight stages, automation decisions, automation handoff audit evidence, and six Git read/preflight operations while preserving the no-commit/no-push/no-PR guarantee.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `git diff --check`.
+
+### Phase 9 Controller Handoff Decision Summary
+
+- Added a visible read-only summary for persisted controller handoff automation decisions:
+  - added `apps/web/src/components/mission/AutomationDecisionSummary.tsx`;
+  - added `apps/web/src/utils/automation-labels.ts`;
+  - live Mission Control now shows branch push, draft PR, staging deploy, merge, production deploy, hard-disabled Git/destructive/secret/model/loop decisions from `controller.automationDecisions`;
+  - read-only mission recovery now shows the same persisted decisions from the archived controller record without replaying actions.
+- Kept the surface informational only:
+  - no branch push, draft PR creation, merge, deploy, force push, branch deletion, destructive Git reset/checkout, secret serialization, fine-tuning, or unbounded loop buttons were added;
+  - the existing Automation Policy card still shows the live evidence-based matrix, while the new summary shows what the controller actually persisted.
+- Extended rendered QA:
+  - delivered desktop/mobile paths assert the controller handoff decision summary renders;
+  - recovered desktop/mobile archive paths assert the persisted handoff decision summary renders;
+  - assertions cover branch push, draft PR, force push, disabled state, and decision row count.
+- Browser-first rendered QA was attempted, but the in-app Browser runtime failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:automation-policy`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `git diff --check`.
+
+### Phase 9 Bounded Remote Handoff Execution Gate
+
+- Added a bounded execution gate after controller handoff policy decisions:
+  - controller evaluates persisted `automationDecisions`;
+  - `branch_push` runs only when `git_branch_push.canRunAutomatically` is true;
+  - `draft_pr_create` runs only when `git_draft_pr_create.canRunAutomatically` is true;
+  - draft PR creation is skipped if a required branch push attempt does not complete.
+- Added audit actions for execution control:
+  - `automation_handoff_execution_started`;
+  - `automation_handoff_execution_skipped`;
+  - `automation_handoff_execution_completed`.
+- Tightened controller evidence derivation so `remote_branch_current` requires published-current remote evidence and a clean worktree before bounded remote handoff can become auto-ready.
+- Default controller behavior remains no-mutation:
+  - current happy path records `automation_handoff_execution_skipped`;
+  - no `branch_push` or `draft_pr_create` Git operation is created unless the automation decision is auto-ready.
+- Added mission-controller verification fixture for the enabled path:
+  - fake Git evidence makes branch push and draft PR decisions auto-ready;
+  - controller executes `branch_push` and `draft_pr_create` through the Git operation service;
+  - execution start and completion audit events are recorded.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:automation-policy`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
+### Phase 9 Remote Handoff Execution Evidence UI
+
+- Added a read-only Remote Handoff Execution card:
+  - added `apps/web/src/components/mission/RemoteHandoffExecutionCard.tsx`;
+  - live Mission Control now shows execution state from `automation_handoff_execution_*` audit events plus `branch_push` and `draft_pr_create` Git operations;
+  - read-only recovery now shows the same execution evidence from archived mission session audit events and recovered Git operations.
+- The card distinguishes:
+  - waiting;
+  - skipped;
+  - running;
+  - completed;
+  - blocked;
+  - failed.
+- Default delivered and recovered paths now visibly show skipped branch push and draft PR execution when no bounded-auto decision is eligible.
+- Extended rendered QA:
+  - delivered desktop/mobile paths assert Remote Handoff Execution appears and is skipped;
+  - recovered desktop/mobile paths assert recovered remote handoff execution appears and is skipped;
+  - assertions cover branch push row, draft PR row, skipped state, and row count.
+- Browser-first rendered QA was attempted, but the in-app Browser runtime failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+- Verification passed:
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:automation-policy`;
+  - `git diff --check`.
+
+### Phase 9 Completed Remote Handoff Rendered QA Fixture
+
+- Extended rendered QA with a dedicated `auto-handoff` orchestrator stack:
+  - uses a policy-enabled Git runner fixture inside `scripts/verify/phase8-rendered-qa.mjs`;
+  - preserves the default complete path where remote handoff execution is skipped when policy/evidence is not eligible;
+  - runs the existing MissionControllerService and GitOperationService path through completed `branch_push` and `draft_pr_create` operations;
+  - verifies the live delivered Mission Control card shows completed branch push and draft PR evidence;
+  - verifies read-only recovery shows the same completed remote handoff execution without replaying actions.
+- Added rendered QA screenshots outside the repository:
+  - `/tmp/team-ai-agent-h4-auto-handoff-desktop.png`;
+  - `/tmp/team-ai-agent-h4-auto-handoff-mobile.png`;
+  - `/tmp/team-ai-agent-h4-auto-handoff-recovery-desktop.png`;
+  - `/tmp/team-ai-agent-h4-auto-handoff-recovery-mobile.png`.
+- Browser-first rendered QA was attempted, but the in-app Browser runtime failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+- Verification passed:
+  - `node --check scripts/verify/phase8-rendered-qa.mjs`;
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:automation-policy`;
+  - `npm run verify:orchestrator`;
+  - `git diff --check`.
+
+### Phase 9 Compact Remote Handoff Signal
+
+- Added a compact War Room handoff signal backed by the same evidence as the Remote Handoff Execution card:
+  - added `apps/web/src/utils/remote-handoff.ts`;
+  - `RemoteHandoffExecutionCard` now reuses the shared status and operation-summary helpers;
+  - the top `Handoff` signal now shows waiting, skipped, running, completed, blocked, or failed from audit events plus branch push / draft PR Git operations.
+- The signal is read-only:
+  - it exposes current handoff execution state without adding branch push, draft PR, merge, deploy, force push, branch deletion, destructive Git, secret serialization, model mutation, or loop controls.
+- Extended rendered QA:
+  - desktop/mobile intake asserts `Handoff` is waiting with remote mutation disabled;
+  - default delivered desktop/mobile asserts `Handoff` is skipped;
+  - auto-handoff delivered desktop/mobile asserts `Handoff` is completed with branch push and draft PR evidence.
+- Browser-first rendered QA was attempted, but the in-app Browser runtime failed with `codex/sandbox-state-meta: missing field sandboxPolicy`; Playwright fallback was used.
+- Verification passed:
+  - `node --check scripts/verify/phase8-rendered-qa.mjs`;
+  - `npm run typecheck`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:automation-policy`;
+  - `npm run verify:orchestrator`;
+  - `git diff --check`.
+
+### Phase 9 Blocked/Failed Remote Handoff Rendered QA Fixtures
+
+- Extended rendered QA with two additional policy-enabled orchestrator stacks:
+  - `blocked-handoff` makes branch push eligible for bounded-auto, then blocks the actual Git runner execution with a `remote_disabled` policy error;
+  - `failed-handoff` makes branch push eligible for bounded-auto, then fails execution with a `command_failed` runner error.
+- Preserved the safety boundary:
+  - both fixtures still run only through the GitOperationService path;
+  - draft PR execution is skipped when branch push does not complete;
+  - merge, production deploy, force push, branch deletion, destructive Git, secret serialization, silent fine-tuning, and unbounded loops remain out of scope.
+- Improved the shared remote handoff UI helper so an unattempted draft PR after an interrupted branch push renders as `skipped` instead of `waiting`.
+- Extended rendered QA assertions:
+  - live delivered desktop/mobile paths show blocked and failed remote handoff execution states;
+  - recovered desktop/mobile archive paths show the same blocked and failed evidence without replaying any action;
+  - the top `Handoff` signal shows blocked/failed status with the branch push interruption reason.
+- Added rendered QA screenshots outside the repository:
+  - `/tmp/team-ai-agent-h4-blocked-handoff-desktop.png`;
+  - `/tmp/team-ai-agent-h4-blocked-handoff-mobile.png`;
+  - `/tmp/team-ai-agent-h4-blocked-handoff-recovery-desktop.png`;
+  - `/tmp/team-ai-agent-h4-blocked-handoff-recovery-mobile.png`;
+  - `/tmp/team-ai-agent-h4-failed-handoff-desktop.png`;
+  - `/tmp/team-ai-agent-h4-failed-handoff-mobile.png`;
+  - `/tmp/team-ai-agent-h4-failed-handoff-recovery-desktop.png`;
+  - `/tmp/team-ai-agent-h4-failed-handoff-recovery-mobile.png`.
+- Verification passed:
+  - `node --check scripts/verify/phase8-rendered-qa.mjs`.
+
+### Phase 10 Bounded Implementation Patch Stage
+
+- Started Phase 10 Implementation Patch Loop by adding a real controller stage between planning and local evidence:
+  - added shared `implementation_patch` stage and `implementation_failed` stop code;
+  - controller now calls `ToolCallService.executeToolCall` with a policy-controlled `file_write`;
+  - the current bounded target is `apps/web/src/generated/mission-implementation-preview.ts`;
+  - the generated source records the mission command, target path, generated timestamp, and implementation sections.
+- Preserved the existing safety boundaries:
+  - the write goes through the Phase 3 local tool-runner path;
+  - denied paths, outside-workspace paths, `.env`, `.git`, `.data`, `node_modules`, `dist`, generated build folders, private-key patterns, arbitrary shell, remote Git, merge, deploy, and destructive Git remain blocked by existing policy layers;
+  - file-write failure stops the controller at `implementation_patch` with `implementation_failed` and linked evidence.
+- Added Mission Control implementation evidence:
+  - new `ImplementationPreviewCard` shows waiting seed state before a mission has generated a patch;
+  - after controller execution, the card reads the latest `Local Code Patch` artifact and shows generated patch status, target path, artifact id, and section summaries;
+  - live and recovery stage lists include `implementation_patch`.
+- Extended deterministic verification:
+  - mission-controller verification now asserts a completed `file_write` with a patch artifact;
+  - Phase 8 E2E verification now expects the implementation patch tool call before local CI commands;
+  - rendered QA now asserts waiting and generated Implementation Preview states on desktop and mobile.
+- Verification passed during the focused slice:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.1 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
+### Phase 10 Rendered Preview Pipeline
+
+- Completed P10.2 by turning the generated implementation module into a rendered preview pipeline:
+  - generated preview source now includes a typed `MissionImplementationPreviewSurface`;
+  - the controller generates landing, dashboard, or workflow surface variants from the mission command;
+  - `ImplementationPreviewCard` renders a preview canvas with headline, summary, actions, and surface panels;
+  - the canvas can be rendered from seed/generated module data before a run or from the latest `Local Code Patch` artifact after a run.
+- Made preview recovery durable:
+  - `MissionRecoveryInspector` now renders `ImplementationPreviewCard` from archived artifact contents;
+  - recovered mission archives show the generated preview surface without replaying the controller or touching the workspace.
+- Extended verification:
+  - mission-controller verification asserts generated preview surface types and workflow surface content;
+  - Phase 8 E2E asserts dashboard mission output writes dashboard preview surface content;
+  - rendered QA asserts waiting, generated, and recovered implementation preview surfaces across desktop and mobile.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.2 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
+### Phase 10 Targeted Patch Expansion
+
+- Completed P10.3 by introducing a shared implementation patch policy:
+  - policy version `phase10-targeted-patch-v1`;
+  - exact allowlist for the implementation preview manifest and three generated surface modules;
+  - owner-role hints for `frontend_developer`;
+  - TypeScript-only target extension checks;
+  - denied path fragments for secret, Git, local data, dependency, build, coverage, and private-key paths;
+  - two-target-per-run cap and per-target byte limit.
+- Expanded controller writes beyond the manifest without loosening the generic tool runner:
+  - controller now preflights all implementation targets against the shared policy before writing;
+  - controller writes `apps/web/src/generated/mission-implementation-preview.ts`;
+  - controller also writes one selected surface module under `apps/web/src/generated/implementation-surfaces/`;
+  - `landing`, `dashboard`, or `workflow` is selected from the mission command.
+- Added seed generated surface modules for all allowlisted surface targets so the repository shape is explicit before runtime writes.
+- Extended verification:
+  - foundation verifies implementation patch policy allow/deny behavior;
+  - mission-controller verifies two file-write artifacts and generated workflow surface module output;
+  - Phase 8 E2E verifies dashboard surface module output and recovered history counts;
+  - rendered QA verifies Mission Control still renders the latest targeted patch artifact in delivered and recovered views.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.3 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
+### Phase 10 Human Approval And Remote Handoff Link
+
+- Completed P10.4 by tightening the remote mutation handoff boundary:
+  - branch push and draft PR creation now require delivered review evidence, passing local CI, required reviewer approvals, and delivery artifact content before execution;
+  - the same remote mutation resolver now also requires implementation patch evidence for both the preview manifest and one generated surface module;
+  - `GitOperationService` can resolve implementation `file_write` evidence through the `ToolCallStore`, with artifact fallback for archived packet evidence;
+  - the default server wires `toolCallStore` into the Git operation service.
+- Draft PR body hydration now carries the full reviewed handoff packet:
+  - delivery report Markdown;
+  - implementation patch target paths and artifact ids;
+  - rendered preview manifest and surface module references;
+  - local CI profile and command results;
+  - required reviewer decisions;
+  - delivery packet and artifact ids;
+  - remote safety notes that keep merge, force push, branch deletion, deployment, and production actions outside automation.
+- Extended verification:
+  - review-packet verification now creates committed implementation patch evidence before exercising enabled branch push and draft PR creation;
+  - mission-controller verification asserts auto-handoff draft PR content includes patch, preview, CI, review, delivery, and remote safety sections;
+  - rendered QA remote handoff fixture now preserves hydrated draft PR title/body from the Git operation request.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`.
+- Full Phase 10 P10.4 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
+### Phase 11 Implementation Surface Hydration
+
+- Started Phase 11 with P11.1 surface module hydration:
+  - added `apps/web/src/utils/implementation-surfaces.ts` as a static registry for the three allowlisted generated surface modules;
+  - `ImplementationPreviewCard` now accepts optional surface modules and resolves a module by exact target path when a `Local Code Patch` artifact points to `apps/web/src/generated/implementation-surfaces/*-surface.ts`;
+  - live Mission Control and recovered mission inspectors pass the same registry into the card;
+  - fallback rendering from patch artifact content remains available when no matching module exists.
+- Preserved the safety boundary:
+  - no arbitrary dynamic import was added;
+  - no browser workspace file read was added;
+  - no shell, remote Git, deploy, merge, force-push, branch deletion, destructive Git, secret serialization, model mutation, or unbounded loop behavior was added.
+- Extended rendered verification:
+  - rendered QA now asserts the generated preview renders the dashboard surface module path output instead of the generic patch-artifact fallback.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run build:web`.
+- Full Phase 11 P11.1 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Continue Phase 7 GitHub Repository Integration with remote-read health, explicit push policy, and draft-PR connector work.
-- Keep remote push, remote PR creation, merge, deployment, production actions, and destructive Git reset/checkout disabled until explicit integration policy is added.
+- Continue Phase 11 with surface module contract hardening.
+- Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

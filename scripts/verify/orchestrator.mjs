@@ -21,6 +21,8 @@ import { ReviewPacketService } from "../../dist/apps/orchestrator/src/review-pac
 import { FileReviewPacketStore } from "../../dist/apps/orchestrator/src/review-packet-store.js";
 import { MissionControllerService } from "../../dist/apps/orchestrator/src/mission-controller-service.js";
 import { FileMissionControllerStore } from "../../dist/apps/orchestrator/src/mission-controller-store.js";
+import { MissionHistoryService } from "../../dist/apps/orchestrator/src/mission-history-service.js";
+import { FileMissionHistoryStore } from "../../dist/apps/orchestrator/src/mission-history-store.js";
 import { createOrchestratorServer } from "../../dist/apps/orchestrator/src/server.js";
 
 const failures = [];
@@ -40,7 +42,9 @@ const toolCallStorePath = join(tempDir, "tool-calls.json");
 const gitOperationStorePath = join(tempDir, "git-operations.json");
 const reviewPacketStorePath = join(tempDir, "review-packets.json");
 const missionControllerStorePath = join(tempDir, "mission-controllers.json");
+const missionHistoryStorePath = join(tempDir, "mission-history.json");
 const workspacePath = join(tempDir, "workspace");
+const remotePath = join(tempDir, "workspace-origin.git");
 await mkdir(join(workspacePath, "docs"), { recursive: true });
 await writeFile(join(workspacePath, "docs", "plan.md"), "# Plan\n\nLocal tool evidence.\n", "utf8");
 await writeFile(join(workspacePath, ".env"), "SECRET=not-real\n", "utf8");
@@ -49,6 +53,11 @@ await git(["config", "user.name", "Team AI Agent"]);
 await git(["config", "user.email", "team-ai-agent@example.local"]);
 await git(["add", "docs/plan.md"]);
 await git(["commit", "-m", "Initial plan"]);
+await git(["branch", "-M", "main"]);
+await run("git", ["init", "--bare", remotePath]);
+await run("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: remotePath });
+await git(["remote", "add", "origin", remotePath]);
+await git(["push", "-u", "origin", "main"]);
 const store = new FileMissionStore(storePath, () => createDefaultOrchestratorSession("2026-06-18T10:00:00.000Z"));
 const artifactStore = new FileArtifactContentStore(artifactStorePath, () =>
   createDefaultOrchestratorArtifactContents("2026-06-18T10:00:00.000Z")
@@ -58,6 +67,7 @@ const toolCallStore = new FileToolCallStore(toolCallStorePath);
 const gitOperationStore = new FileGitOperationStore(gitOperationStorePath);
 const reviewPacketStore = new FileReviewPacketStore(reviewPacketStorePath);
 const missionControllerStore = new FileMissionControllerStore(missionControllerStorePath);
+const missionHistoryStore = new FileMissionHistoryStore(missionHistoryStorePath);
 const eventBroker = new AgentRunEventBroker();
 const runService = new AgentRunService({
   executor: new DeterministicAgentExecutor(),
@@ -80,6 +90,8 @@ const gitOperationService = new GitOperationService({
   operationStore: gitOperationStore,
   missionStore: store,
   artifactStore,
+  reviewPacketStore,
+  toolCallStore,
   now: () => "2026-06-18T10:32:00.000Z"
 });
 const reviewPacketService = new ReviewPacketService({
@@ -91,6 +103,17 @@ const reviewPacketService = new ReviewPacketService({
   toolCallService,
   now: () => "2026-06-18T10:33:00.000Z"
 });
+const missionHistoryService = new MissionHistoryService({
+  historyStore: missionHistoryStore,
+  missionStore: store,
+  controllerStore: missionControllerStore,
+  runStore,
+  toolCallStore,
+  gitOperationStore,
+  reviewPacketStore,
+  artifactStore,
+  now: () => "2026-06-18T10:34:30.000Z"
+});
 const missionControllerService = new MissionControllerService({
   controllerStore: missionControllerStore,
   missionStore: store,
@@ -99,6 +122,7 @@ const missionControllerService = new MissionControllerService({
   gitOperationService,
   reviewPacketService,
   reviewer: new DeterministicReviewExecutor(),
+  historyRecorder: missionHistoryService,
   now: () => "2026-06-18T10:34:00.000Z"
 });
 const server = createOrchestratorServer({
@@ -114,6 +138,7 @@ const server = createOrchestratorServer({
   gitOperationService,
   reviewPacketService,
   missionControllerService,
+  missionHistoryService,
   now: () => "2026-06-18T10:30:00.000Z"
 });
 const address = await new Promise((resolveAddress) => {
@@ -135,6 +160,7 @@ try {
 
   const gitPolicy = await requestJson(`${baseUrl}/api/mission/git-policy`);
   assert(gitPolicy.workspaceRoot === workspacePath, "Git policy endpoint should expose the configured local workspace.");
+  assert(gitPolicy.allowRemoteRead === true, "Git policy should allow read-only remote health by default.");
   assert(gitPolicy.allowGitCommit === false, "Git policy should block local commits by default.");
   assert(gitPolicy.allowPullRequestCreate === false, "Git policy should block PR creation by default.");
 
@@ -143,6 +169,10 @@ try {
   assert(initialSession.runtime.autopilotCursor === 0, "Initial session should start at autopilot cursor 0.");
   assert(initialSession.artifactRecords.length === 5, "Initial session should include seed artifact records.");
   assert(initialSession.auditEvents.length === 1, "Initial session should include one seed audit event.");
+  assert(initialSession.missionAssumptions.length === 1, "Initial session should include one saved mission assumption.");
+  assert(initialSession.assumptionDraft.includes("Sales API"), "Initial session should expose editable assumption draft text.");
+  const initialHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  assert(initialHistory.length === 1 && initialHistory[0].kind === "current", "Mission history should start with the current session only.");
 
   const initialArtifacts = await requestJson(`${baseUrl}/api/mission/artifacts`);
   assert(initialArtifacts.length === 5, "Artifacts endpoint should return seed artifact contents.");
@@ -161,6 +191,7 @@ try {
   assert(advance.snapshot.runtime.activeRouteIndex === 1, "Autopilot should advance active route index.");
   assert(advance.snapshot.artifactRecords.length === 6, "Autopilot should append an artifact record.");
   assert(advance.snapshot.auditEvents.length === 2, "Autopilot should append an audit event.");
+  assert(advance.snapshot.missionAssumptions.length === 1, "Autopilot should preserve mission assumptions.");
   assert(advance.artifactContent.artifactId === "art-acceptance", "Autopilot should return generated artifact content.");
   assert(advance.artifactContent.markdown.includes("Acceptance matrix handoff"), "Artifact markdown should include handoff context.");
 
@@ -281,6 +312,88 @@ try {
     })
   });
   assert(gitPrDraft.result.prDraft.status === "integration_needed", "PR draft should remain offline when PR creation is disabled.");
+  const gitRemoteHealth = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-remote-health",
+      roleId: "devops_lead",
+      kind: "remote_health",
+      baseBranch: "main"
+    })
+  });
+  assert(gitRemoteHealth.status === "completed", "Git remote-health endpoint should complete.");
+  assert(gitRemoteHealth.result.remoteHealth.access === "ok", "Git remote-health endpoint should report reachable origin access.");
+  assert(gitRemoteHealth.artifactContentId, "Git remote-health should create evidence artifact through the HTTP boundary.");
+  const gitRemoteEvidence = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-remote-evidence",
+      roleId: "release_manager",
+      kind: "remote_evidence",
+      baseBranch: "main",
+      branchName: "main"
+    })
+  });
+  assert(gitRemoteEvidence.status === "completed", "Git remote evidence endpoint should complete.");
+  assert(gitRemoteEvidence.result.remoteEvidence.publicationState === "published_current", "Git remote evidence should compare local and remote branch commits.");
+  assert(gitRemoteEvidence.result.remoteEvidence.blockedActions.some((item) => item.includes("Merge")), "Git remote evidence should keep merge blocked.");
+  assert(gitRemoteEvidence.artifactContentId, "Git remote evidence should create artifact evidence through the HTTP boundary.");
+  const gitBranchPushPolicy = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-branch-push-policy",
+      roleId: "release_manager",
+      kind: "branch_push_policy",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(gitBranchPushPolicy.status === "completed", "Branch push policy endpoint should complete without pushing.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.allowed === false, "Branch push policy endpoint should stay blocked by default.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.blockers.some((item) => item.includes("Explicit reviewPacketId")), "Branch push policy should require explicit reviewed delivery evidence.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.forcePushAllowed === false, "Branch push policy should keep force push disabled.");
+  assert(gitBranchPushPolicy.result.remoteMutationPolicy.branchDeletionAllowed === false, "Branch push policy should keep branch deletion disabled.");
+  const gitDraftPrPolicy = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-draft-pr-policy",
+      roleId: "release_manager",
+      kind: "draft_pr_policy",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(gitDraftPrPolicy.status === "completed", "Draft PR policy endpoint should complete without creating a PR.");
+  assert(gitDraftPrPolicy.result.remoteMutationPolicy.allowed === false, "Draft PR policy endpoint should stay blocked by default.");
+  assert(gitDraftPrPolicy.result.remoteMutationPolicy.blockers.some((item) => item.includes("Draft PR creation is disabled")), "Draft PR policy should record disabled PR permission.");
+  const blockedBranchPush = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-branch-push",
+      roleId: "release_manager",
+      kind: "branch_push",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(blockedBranchPush.status === "blocked" && blockedBranchPush.errorCode === "remote_disabled", "Branch push endpoint should be blocked by default.");
+  const blockedDraftPrCreate = await requestJson(`${baseUrl}/api/mission/git-operations`, {
+    method: "POST",
+    body: JSON.stringify({
+      missionId: initialSession.missionId,
+      taskId: "task-git-draft-pr-create",
+      roleId: "release_manager",
+      kind: "draft_pr_create",
+      baseBranch: "main",
+      branchName: "codex/http-policy"
+    })
+  });
+  assert(blockedDraftPrCreate.status === "blocked" && blockedDraftPrCreate.errorCode === "remote_disabled", "Draft PR creation endpoint should be blocked by default.");
   const blockedGitCommit = await requestJson(`${baseUrl}/api/mission/git-operations`, {
     method: "POST",
     body: JSON.stringify({
@@ -294,7 +407,7 @@ try {
   const fetchedGitOperation = await requestJson(`${baseUrl}/api/mission/git-operations/${encodeURIComponent(gitPlan.id)}`);
   assert(fetchedGitOperation.id === gitPlan.id, "Git operation detail endpoint should fetch by id.");
   const listedGitOperations = await requestJson(`${baseUrl}/api/mission/git-operations?missionId=${encodeURIComponent(initialSession.missionId)}`);
-  assert(listedGitOperations.length === 5, "Git operation list endpoint should return mission Git operations.");
+  assert(listedGitOperations.length === 11, "Git operation list endpoint should return mission Git operations.");
 
   const reviewPacket = await requestJson(`${baseUrl}/api/mission/review-packets`, {
     method: "POST",
@@ -338,15 +451,44 @@ try {
   assert(fetchedController.id === missionController.id, "Mission controller detail endpoint should fetch by id.");
   const listedControllers = await requestJson(`${baseUrl}/api/mission/controllers?missionId=${encodeURIComponent(initialSession.missionId)}`);
   assert(listedControllers[0].id === missionController.id, "Mission controller list endpoint should return mission controllers.");
+  const cancelledHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  const cancelledArchive = cancelledHistory.find((item) => item.kind === "archived" && item.controllerId === missionController.id);
+  assert(cancelledArchive?.status === "cancelled", "Cancelling a controller should archive a cancelled read-only run.");
+  const cancelledHistoryDetail = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(cancelledArchive.id)}`);
+  assert(cancelledHistoryDetail.controller.status === "cancelled", "History detail should reopen the persisted controller state.");
+  assert(cancelledHistoryDetail.toolCalls.length === 3, "History detail should include prior mission tool evidence.");
+  assert(cancelledHistoryDetail.gitOperations.length === 11, "History detail should include prior mission Git evidence.");
+  assert(cancelledHistoryDetail.reviewPackets.length === 1, "History detail should include prior review evidence.");
+  const retriedController = await requestJson(`${baseUrl}/api/mission/controllers/${encodeURIComponent(missionController.id)}/retry`, { method: "POST" });
+  assert(retriedController.attempt === 2, "Retry should advance the controller attempt after archiving attempt one.");
+  const cancelledRetry = await requestJson(`${baseUrl}/api/mission/controllers/${encodeURIComponent(missionController.id)}/cancel`, { method: "POST" });
+  assert(cancelledRetry.status === "cancelled" && cancelledRetry.attempt === 2, "The retried controller should remain independently cancellable.");
+  const retryHistory = await requestJson(`${baseUrl}/api/mission/history`);
+  assert(retryHistory.some((item) => item.kind === "archived" && item.attempt === 1), "Retry history should preserve attempt one.");
+  assert(retryHistory.some((item) => item.kind === "archived" && item.attempt === 2), "Retry history should archive attempt two separately.");
 
   const saved = await requestJson(`${baseUrl}/api/mission/session`, {
     method: "PUT",
     body: JSON.stringify({
       ...afterAdvance,
-      commandDraft: "Manual save from verification."
+      commandDraft: "Manual save from verification.",
+      assumptionDraft: "Repository verification workspace remains local.",
+      missionAssumptions: [{
+        id: "assumption-verification-local",
+        missionId: initialSession.missionId,
+        assumption: "Repository verification workspace remains local.",
+        source: "Verification intake",
+        ambiguityClass: "low",
+        confidence: 90,
+        impact: "Remote mutation remains disabled.",
+        ownerRoleId: "lead_ba",
+        reviewStatus: "open",
+        createdAt: "2026-06-18T10:35:00.000Z"
+      }]
     })
   });
   assert(saved.commandDraft === "Manual save from verification.", "PUT session should persist valid snapshots.");
+  assert(saved.missionAssumptions[0].assumption.includes("remains local"), "PUT session should persist mission assumptions.");
 
   const rejected = await fetch(`${baseUrl}/api/mission/session`, {
     method: "PUT",
@@ -358,6 +500,7 @@ try {
   const reset = await requestJson(`${baseUrl}/api/mission/reset`, { method: "POST" });
   assert(reset.runtime.autopilotCursor === 0, "Reset should restore autopilot cursor.");
   assert(reset.commandDraft.includes("Build sales analytics dashboard"), "Reset should restore default command.");
+  assert(reset.missionAssumptions.length === 1, "Reset should restore the default mission assumption.");
   const resetArtifacts = await requestJson(`${baseUrl}/api/mission/artifacts`);
   assert(resetArtifacts.length === 5, "Reset should restore seed artifact contents.");
   assert((await requestJson(`${baseUrl}/api/mission/agent-runs`)).length === 0, "Reset should clear agent run history.");
@@ -365,6 +508,16 @@ try {
   assert((await requestJson(`${baseUrl}/api/mission/git-operations`)).length === 0, "Reset should clear Git operation history.");
   assert((await requestJson(`${baseUrl}/api/mission/review-packets`)).length === 0, "Reset should clear review packet history.");
   assert((await requestJson(`${baseUrl}/api/mission/controllers`)).length === 0, "Reset should clear mission controller history.");
+  const historyAfterReset = await requestJson(`${baseUrl}/api/mission/history`);
+  const archiveAfterReset = historyAfterReset.find((item) => item.id === cancelledArchive.id);
+  assert(historyAfterReset[0].kind === "current", "Reset should retain a current session at the top of history.");
+  assert(Boolean(archiveAfterReset), "Reset should retain an immutable archived run.");
+  const recoveredAfterReset = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(archiveAfterReset.id)}`);
+  assert(recoveredAfterReset.command === "Run a local autonomous mission.", "Recovery should preserve the original controller command after reset.");
+  assert(recoveredAfterReset.archiveReason === "controller_terminal", "Archived terminal runs should remain immutable when reset captures current state.");
+  assert(recoveredAfterReset.toolCalls.length === 3, "Recovery should preserve tool evidence after active stores reset.");
+  assert(recoveredAfterReset.gitOperations.length === 11, "Recovery should preserve Git evidence after active stores reset.");
+  assert(recoveredAfterReset.reviewPackets.length === 1, "Recovery should preserve review evidence after active stores reset.");
 } finally {
   await new Promise((resolveClose) => server.close(resolveClose));
   await rm(tempDir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -20,6 +20,7 @@ import { ToolCallService } from "../../dist/apps/orchestrator/src/tool-call-serv
 import { FileToolCallStore } from "../../dist/apps/orchestrator/src/tool-call-store.js";
 import { LocalGitRunner } from "../../dist/packages/git-runner/src/index.js";
 import { LocalToolRunner } from "../../dist/packages/tool-runner/src/index.js";
+import { MISSION_CONTROLLER_STAGES } from "../../dist/packages/shared/src/index.js";
 
 const failures = [];
 const assert = (condition, message) => { if (!condition) failures.push(message); };
@@ -55,9 +56,56 @@ try {
   assert(duplicate.id === started.id, "Controller start should be idempotent.");
   const completed = await completeStack.controllerService.waitForTerminalController(started.id, 15_000);
   assert(completed.status === "completed", `Complete path should finish, got ${completed.status}: ${completed.stopReason?.message ?? "no reason"}`);
-  assert(completed.stageResults.filter((item) => item.status === "completed" && item.attempt === 1).length === 7, "Complete path should record all seven stages.");
+  assert(MISSION_CONTROLLER_STAGES.every((stage) => completed.stageResults.some((item) => item.stage === stage && item.status === "completed")), "Complete path should record every controller stage.");
   assert(completed.reviewerResults.length === 3 && completed.reviewerResults.every((item) => item.decision === "pass"), "Three independent reviewer roles should pass.");
   assert(Boolean(completed.deliveryArtifactContentId), "Complete controller should reference a delivery artifact.");
+  assert(completed.currentStage === "handoff_policy", "Complete controller should finish on the handoff policy stage.");
+  assert(completed.automationDecisions?.some((decision) => decision.kind === "git_branch_push"), "Complete controller should persist branch push automation decision.");
+  assert(completed.automationDecisions?.some((decision) => decision.kind === "force_push" && decision.disabled), "Complete controller should persist hard-disabled force push decision.");
+  const completeToolCalls = await completeStack.toolCallStore.listToolCalls(missionId);
+  const completeFileWrites = completeToolCalls.filter((call) => call.kind === "file_write");
+  assert(completeFileWrites.length === 2, "Complete controller should create two targeted local implementation patch artifacts.");
+  assert(completeFileWrites.every((call) => call.status === "completed" && call.artifactContentId), "Complete controller implementation patch writes should complete with artifacts.");
+  assert(completeFileWrites.some((call) => call.targetPath === "apps/web/src/generated/mission-implementation-preview.ts"), "Complete controller should write the implementation preview manifest.");
+  assert(completeFileWrites.some((call) => call.targetPath === "apps/web/src/generated/implementation-surfaces/workflow-surface.ts"), "Complete controller should write the workflow surface module.");
+  const generatedPreview = await readFile(join(workspace, "apps/web/src/generated/mission-implementation-preview.ts"), "utf8");
+  assert(generatedPreview.includes("MissionImplementationPreviewSurface"), "Complete controller should write rendered preview surface types.");
+  assert(generatedPreview.includes("workflow-surface.ts"), "Complete controller should reference the workflow surface module path.");
+  assert(generatedPreview.includes("\"Workflow preview\""), "Generic controller mission should write a workflow rendered preview surface.");
+  const generatedSurface = await readFile(join(workspace, "apps/web/src/generated/implementation-surfaces/workflow-surface.ts"), "utf8");
+  assert(generatedSurface.includes("GeneratedImplementationSurfaceModule"), "Complete controller should write a typed workflow surface module.");
+  assert(generatedSurface.includes("\"kind\": \"workflow\""), "Workflow surface module should record workflow kind.");
+  const completeGitOperations = await completeStack.gitOperationStore.listOperations(missionId);
+  assert(["remote_evidence", "branch_push_policy", "draft_pr_policy"].every((kind) => completeGitOperations.some((operation) => operation.kind === kind)), "Complete controller should collect read-only handoff policy Git evidence.");
+  assert(completeGitOperations.every((operation) => !["local_commit", "branch_push", "draft_pr_create"].includes(operation.kind)), "Complete controller should not commit, push, or create PRs.");
+  const completeSession = await completeStack.missionStore.readSession();
+  assert(completeSession.auditEvents.some((event) => event.action === "automation_handoff_execution_skipped"), "Default complete controller should audit skipped remote handoff execution.");
+
+  const autoHandoffStack = createStack("auto-handoff", { autoHandoffGit: true });
+  const autoMission = (await autoHandoffStack.missionStore.readSession()).missionId;
+  const autoRun = await autoHandoffStack.controllerService.startController({
+    missionId: autoMission,
+    taskId: "task-controller-auto-handoff",
+    command: "Verify bounded remote handoff execution.",
+    providerPreference: "deterministic"
+  });
+  const autoCompleted = await autoHandoffStack.controllerService.waitForTerminalController(autoRun.id, 15_000);
+  assert(autoCompleted.status === "completed", `Auto handoff controller should complete, got ${autoCompleted.status}: ${autoCompleted.stopReason?.code ?? "no-code"} ${autoCompleted.stopReason?.message ?? "no-message"}.`);
+  assert(autoCompleted.automationDecisions?.some((decision) => decision.kind === "git_branch_push" && decision.canRunAutomatically), "Auto handoff fixture should make branch push eligible.");
+  assert(autoCompleted.automationDecisions?.some((decision) => decision.kind === "git_draft_pr_create" && decision.canRunAutomatically), "Auto handoff fixture should make draft PR creation eligible.");
+  const autoGitOperations = await autoHandoffStack.gitOperationStore.listOperations(autoMission);
+  assert(autoGitOperations.some((operation) => operation.kind === "branch_push" && operation.status === "completed"), "Auto handoff fixture should execute branch push through the Git operation service.");
+  assert(autoGitOperations.some((operation) => operation.kind === "draft_pr_create" && operation.status === "completed"), "Auto handoff fixture should execute draft PR creation through the Git operation service.");
+  const autoDraftPr = autoGitOperations.find((operation) => operation.kind === "draft_pr_create" && operation.status === "completed");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Implementation Patch"), "Auto handoff draft PR should include implementation patch evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Rendered Preview"), "Auto handoff draft PR should include rendered preview evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## CI Evidence"), "Auto handoff draft PR should include CI evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Review Evidence"), "Auto handoff draft PR should include reviewer evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Delivery Evidence"), "Auto handoff draft PR should include delivery evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Remote Safety"), "Auto handoff draft PR should keep remote safety notes.");
+  const autoSession = await autoHandoffStack.missionStore.readSession();
+  assert(autoSession.auditEvents.some((event) => event.action === "automation_handoff_execution_started"), "Auto handoff fixture should audit execution start.");
+  assert(autoSession.auditEvents.some((event) => event.action === "automation_handoff_execution_completed"), "Auto handoff fixture should audit execution completion.");
 
   const policyStack = createStack("policy", { allowGitRead: false });
   const policyMission = (await policyStack.missionStore.readSession()).missionId;
@@ -133,7 +181,7 @@ if (failures.length > 0) {
 }
 
 console.log("Mission controller verification passed.");
-console.log("Paths: complete, policy block, retry limit, CI failure, reviewer revision, cancel, recovery.");
+console.log("Paths: complete with handoff policy, auto handoff execution, policy block, retry limit, CI failure, reviewer revision, cancel, recovery.");
 
 function createStack(name, options = {}) {
   const stackRoot = join(root, name);
@@ -150,12 +198,16 @@ function createStack(name, options = {}) {
     missionStore,
     artifactStore
   });
-  const gitOperationService = new GitOperationService({
-    runner: new LocalGitRunner({ workspaceRoot: workspace, allowGitRead: options.allowGitRead ?? true, timeoutMs: 5000 }),
-    operationStore: gitOperationStore,
-    missionStore,
-    artifactStore
-  });
+  const gitOperationService = options.autoHandoffGit
+    ? createAutoHandoffGitOperationService(gitOperationStore)
+    : new GitOperationService({
+      runner: new LocalGitRunner({ workspaceRoot: workspace, allowGitRead: options.allowGitRead ?? true, timeoutMs: 5000 }),
+      operationStore: gitOperationStore,
+      missionStore,
+      artifactStore,
+      reviewPacketStore: packetStore,
+      toolCallStore
+    });
   const reviewPacketService = new ReviewPacketService({ packetStore, missionStore, artifactStore, toolCallStore, gitOperationStore, toolCallService });
   const agentRunService = new AgentRunService({
     executor: new DeterministicAgentExecutor(),
@@ -177,7 +229,230 @@ function createStack(name, options = {}) {
     maxAttempts: 2,
     reviewerRevisionLimit: 1
   });
-  return { missionStore, controllerStore, controllerService };
+  return { missionStore, controllerStore, controllerService, gitOperationStore, toolCallStore };
+}
+
+function createAutoHandoffGitOperationService(operationStore) {
+  let counter = 0;
+  const headSha = "a".repeat(40);
+  const branchName = "codex/task-controller-auto-handoff";
+  const worktree = {
+    isRepository: true,
+    branch: branchName,
+    headSha,
+    isClean: true,
+    hasDeniedChanges: false,
+    files: [{ path: "src/feature.ts", indexStatus: "M", worktreeStatus: " ", kind: "modified", isDenied: false }],
+    summary: "Auto handoff fixture worktree is clean on codex branch.",
+    checkedAt: new Date().toISOString()
+  };
+  const diff = {
+    changedFiles: 1,
+    insertions: 1,
+    deletions: 0,
+    files: [{ path: "src/feature.ts", insertions: 1, deletions: 0, status: "modified", isDenied: false }],
+    clipped: false
+  };
+  const commitPlan = {
+    branchName,
+    commitMessage: "Update auto handoff fixture",
+    summary: "Commit plan is ready for auto handoff fixture evidence.",
+    changedFiles: ["src/feature.ts"],
+    requiredEvidence: ["Test run evidence", "Reviewer approval"],
+    risks: ["Fixture-only remote handoff path."],
+    reviewers: ["tech_lead", "automation_qa"],
+    ready: true
+  };
+
+  return {
+    getPolicy: () => ({
+      schemaVersion: 1,
+      workspaceRoot: workspace,
+      allowedWorkspaceRoots: [workspace],
+      allowGitRead: true,
+      allowRemoteRead: true,
+      allowGitCommit: false,
+      allowRemotePush: true,
+      allowPullRequestCreate: true,
+      timeoutMs: 5000,
+      maxDiffBytes: 80_000,
+      deniedPathPatterns: [".env", ".data", "node_modules", "dist"]
+    }),
+    executeOperation: async (input) => {
+      const now = new Date().toISOString();
+      const id = `git-auto-${++counter}-${input.kind}`;
+      const result = gitResultForAutoHandoff(input.kind, {
+        branchName: input.branchName ?? branchName,
+        commitPlan,
+        diff,
+        headSha,
+        worktree
+      });
+      const record = {
+        schemaVersion: 1,
+        id,
+        missionId: input.missionId,
+        taskId: input.taskId,
+        roleId: input.roleId,
+        kind: input.kind,
+        status: "completed",
+        policy: { allowed: true, normalizedCwd: workspace, reason: "Auto handoff fixture policy allowed." },
+        result,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now
+      };
+      return operationStore.upsertOperation(record);
+    }
+  };
+}
+
+function gitResultForAutoHandoff(kind, fixture) {
+  const base = {
+    durationMs: 1,
+    worktree: fixture.worktree
+  };
+  if (kind === "status") {
+    return {
+      ...base,
+      summary: fixture.worktree.summary,
+      evidence: [`Branch: ${fixture.worktree.branch}`, `HEAD: ${fixture.worktree.headSha}`]
+    };
+  }
+  if (kind === "diff") {
+    return {
+      ...base,
+      summary: "Git diff has 1 changed file for auto handoff fixture.",
+      evidence: ["src/feature.ts: +1/-0"],
+      diff: fixture.diff
+    };
+  }
+  if (kind === "commit_plan") {
+    return {
+      ...base,
+      summary: fixture.commitPlan.summary,
+      evidence: [`Branch proposal: ${fixture.commitPlan.branchName}`, "Ready: true"],
+      diff: fixture.diff,
+      commitPlan: fixture.commitPlan
+    };
+  }
+  if (kind === "remote_evidence") {
+    return {
+      ...base,
+      summary: `${fixture.branchName} is published and current.`,
+      evidence: [`Branch: ${fixture.branchName}`, "Publication: published_current"],
+      remoteEvidence: {
+        remoteName: "origin",
+        provider: "github",
+        repository: "phetjaaeiei/AI-Agent",
+        branchName: fixture.branchName,
+        defaultBranch: "main",
+        localCommitSha: fixture.headSha,
+        remoteCommitSha: fixture.headSha,
+        publicationState: "published_current",
+        pullRequest: { state: "none", summary: "No draft PR exists yet." },
+        checks: { state: "passing", total: 1, passed: 1, pending: 0, failed: 0, summary: "1 passing check." },
+        blockedActions: ["Merge remains a human decision.", "Deployment and production actions are disabled.", "Force push is disabled.", "Branch deletion is disabled."],
+        retryable: false,
+        checkedAt: new Date().toISOString(),
+        summary: `${fixture.branchName} is published and current.`
+      }
+    };
+  }
+  if (kind === "branch_push_policy" || kind === "draft_pr_policy") {
+    const mutationKind = kind === "branch_push_policy" ? "branch_push" : "draft_pr";
+    return {
+      ...base,
+      summary: `${mutationKind} policy preflight passed.`,
+      evidence: [`Mutation: ${mutationKind}`, `Branch: ${fixture.branchName}`, "Reviewed delivery present: true"],
+      diff: fixture.diff,
+      commitPlan: fixture.commitPlan,
+      remoteMutationPolicy: {
+        mutationKind,
+        allowed: true,
+        reason: `${mutationKind} policy preflight passed with reviewed delivery evidence.`,
+        actorRoleId: "release_manager",
+        branchName: fixture.branchName,
+        commitSha: fixture.headSha,
+        remoteName: "origin",
+        remoteTarget: "phetjaaeiei/AI-Agent",
+        baseBranch: "main",
+        permissionAllowed: true,
+        reviewedDeliveryRequired: true,
+        reviewedDeliveryPresent: true,
+        reviewPacketId: "fixture-review-packet",
+        deliveryArtifactContentId: "fixture-delivery",
+        forcePushAllowed: false,
+        branchDeletionAllowed: false,
+        blockers: [],
+        checkedAt: new Date().toISOString()
+      }
+    };
+  }
+  if (kind === "branch_push") {
+    return {
+      ...base,
+      summary: `Pushed ${fixture.branchName} to origin at ${fixture.headSha.slice(0, 12)}.`,
+      evidence: [`Remote: origin`, `Branch: ${fixture.branchName}`, "Force push: disabled", "Branch deletion: disabled"],
+      branchPush: {
+        remoteName: "origin",
+        branchName: fixture.branchName,
+        commitSha: fixture.headSha,
+        remoteTarget: "phetjaaeiei/AI-Agent",
+        trackingBranch: `origin/${fixture.branchName}`,
+        pushedAt: new Date().toISOString(),
+        summary: `Pushed ${fixture.branchName}.`
+      }
+    };
+  }
+  if (kind === "draft_pr_create") {
+    const body = [
+      "## Verification",
+      "Fixture reviewed delivery.",
+      "",
+      "## Implementation Patch",
+      "- apps/web/src/generated/mission-implementation-preview.ts (artifact fixture-preview): fixture preview manifest",
+      "- apps/web/src/generated/implementation-surfaces/workflow-surface.ts (artifact fixture-surface): fixture workflow surface",
+      "",
+      "## Rendered Preview",
+      "- Preview manifest: apps/web/src/generated/mission-implementation-preview.ts",
+      "- Surface module: apps/web/src/generated/implementation-surfaces/workflow-surface.ts",
+      "",
+      "## CI Evidence",
+      "- Status: passed",
+      "",
+      "## Review Evidence",
+      "- tech_lead: pass",
+      "- qa_lead: pass",
+      "- lead_ba: pass",
+      "",
+      "## Delivery Evidence",
+      "- Review packet: fixture-review-packet",
+      "- Delivery artifact: fixture-delivery",
+      "",
+      "## Remote Safety",
+      "Merge remains manual."
+    ].join("\n");
+    return {
+      ...base,
+      summary: `Created draft PR for ${fixture.branchName} into main.`,
+      evidence: [`Head: ${fixture.branchName}`, "Draft: true", "Merge: manual"],
+      draftPullRequest: {
+        url: "https://github.com/phetjaaeiei/AI-Agent/pull/456",
+        number: 456,
+        title: "Draft PR: Auto handoff fixture",
+        body,
+        baseBranch: "main",
+        headBranch: fixture.branchName,
+        remoteTarget: "phetjaaeiei/AI-Agent",
+        draft: true,
+        createdAt: new Date().toISOString(),
+        summary: `Created draft PR for ${fixture.branchName}.`
+      }
+    };
+  }
+  throw new Error(`Unsupported auto handoff Git fixture operation: ${kind}`);
 }
 
 function createFixtureToolRunner(failingCommand) {
@@ -186,6 +461,7 @@ function createFixtureToolRunner(failingCommand) {
     getPolicy: () => policyRunner.getPolicy(),
     evaluate: (request) => policyRunner.evaluate(request),
     execute: async (request) => {
+      if (request.kind === "file_write") return policyRunner.execute(request);
       const failed = request.command === failingCommand;
       return {
         summary: failed ? `${request.command} failed.` : `${request.command} passed.`,

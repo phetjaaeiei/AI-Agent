@@ -1,5 +1,6 @@
 import { ROLE_IDS } from "./roles.js";
 import type { AgentProvider, AgentRuntimeMode } from "./agent-runs.js";
+import type { AutomationDecision } from "./automation.js";
 import type { ReviewerDecision } from "./reviews.js";
 import type { RoleId } from "./roles.js";
 
@@ -10,12 +11,14 @@ export const MISSION_CONTROLLER_STORE_SCHEMA_VERSION = 1;
 
 export const MISSION_CONTROLLER_STAGES = [
   "planning",
+  "implementation_patch",
   "tool_evidence",
   "git_evidence",
   "review_packet",
   "local_ci",
   "reviewers",
-  "delivery"
+  "delivery",
+  "handoff_policy"
 ] as const;
 
 export type MissionControllerStage = (typeof MISSION_CONTROLLER_STAGES)[number];
@@ -23,6 +26,7 @@ export type MissionControllerStatus = "queued" | "running" | "completed" | "bloc
 export type MissionControllerStageStatus = "running" | "completed" | "blocked" | "failed" | "cancelled";
 export type MissionControllerStopCode =
   | "planning_blocked"
+  | "implementation_failed"
   | "tool_failed"
   | "git_policy"
   | "git_not_ready"
@@ -75,6 +79,7 @@ export type MissionControllerRecord = {
   maxAttempts: number;
   stageResults: readonly MissionControllerStageResult[];
   reviewerResults: readonly LocalReviewerResult[];
+  automationDecisions?: readonly AutomationDecision[];
   agentRunId?: string;
   reviewPacketId?: string;
   deliveryArtifactContentId?: string;
