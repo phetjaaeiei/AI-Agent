@@ -99,6 +99,8 @@ persisted automationDecisions
 
 Default runs skip execution because required policy and committed remote evidence are not present. When every policy requirement is present, the controller delegates only to the Git-specific policy layer. It does not bypass Git runner checks.
 
+Phase 10 P10.4 adds an extra reviewed handoff check inside the Git operation service: branch push and draft PR creation must resolve delivered review evidence, passing local CI, required reviewer approvals, delivery artifact content, and implementation patch artifacts for both the generated preview manifest and an allowlisted surface module. Draft PR body hydration includes those evidence references before invoking the GitHub draft-PR command.
+
 This stage records activity and audit events. It still does not execute merge, deployment, force push, branch deletion, destructive Git operations, secret serialization, fine-tuning, or unbounded loops.
 
 ## Required Evidence

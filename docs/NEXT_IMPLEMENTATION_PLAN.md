@@ -1,10 +1,10 @@
 # Next Implementation Plan: Phase 10 Implementation Patch Loop
 
-Status: Phase 10 complete through P10.3 targeted patch expansion
+Status: Phase 10 complete through P10.4 human approval and remote handoff link
 
 ## 1. Current Position
 
-Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage, a rendered preview pipeline, and targeted patch expansion before evidence, review, CI, delivery, and handoff policy.
+Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has given the autonomous controller a bounded local implementation-patch stage, a rendered preview pipeline, targeted patch expansion, and reviewed draft-PR handoff evidence before any remote mutation can consume implementation output.
 
 - Repository: `phetjaaeiei/AI-Agent`
 - Branch: `codex/phase-7-remote-mutation-policy`
@@ -12,7 +12,7 @@ Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phas
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, policy-controlled targeted local implementation patches, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
+The app can now run local-first agent planning, policy-controlled targeted local implementation patches, rendered implementation preview, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, reviewed draft-PR evidence hydration, and read-only recovery of previous mission runs.
 
 The next target is not "let the agent rewrite anything." The target is a visible, bounded implementation loop:
 
@@ -81,9 +81,10 @@ implementation request
 
 ### Slice P10.4: Human Approval And Remote Handoff Link
 
-- pending: require review/CI/delivery evidence before any remote handoff action can consume implementation patch output;
-- pending: make draft PR body include patch, preview, CI, review, and delivery evidence when connector policy is enabled;
-- pending: keep automatic merge and production deployment manual-only.
+- complete: Git remote mutation policy now explicitly requires delivered review evidence, passing local CI, required reviewer approvals, delivery artifact content, implementation preview manifest evidence, and implementation surface module evidence before branch push or draft PR creation can execute;
+- complete: `GitOperationService` receives the tool-call store so it can resolve implementation `file_write` evidence by target path and artifact id instead of relying only on delivery Markdown;
+- complete: draft PR body hydration now includes delivery Markdown plus implementation patch targets, rendered preview target evidence, CI command results, reviewer decisions, delivery artifact ids, and remote safety notes;
+- complete: automatic merge and production deployment remain manual-only, with force push, branch deletion, destructive Git, and deploy actions still disabled by the guarded automation policy.
 
 ## 5. Phase 9 Completed Baseline
 

@@ -9,7 +9,8 @@ import type {
   GitPolicyDecision,
   GitPolicySnapshot,
   GitRemoteMutationPolicy,
-  ReviewPacket
+  ReviewPacket,
+  ToolCallRecord
 } from "../../../packages/shared/src/index.js";
 import {
   createRuntimeArtifactRecord,
@@ -21,6 +22,7 @@ import type { ArtifactContentStore } from "./artifact-content-store.js";
 import type { MissionStore } from "./mission-store.js";
 import type { GitOperationStore } from "./git-operation-store.js";
 import type { ReviewPacketStore } from "./review-packet-store.js";
+import type { ToolCallStore } from "./tool-call-store.js";
 
 type GitOperationServiceOptions = {
   runner: GitRunner;
@@ -28,8 +30,26 @@ type GitOperationServiceOptions = {
   missionStore: MissionStore;
   artifactStore: ArtifactContentStore;
   reviewPacketStore?: ReviewPacketStore;
+  toolCallStore?: ToolCallStore;
   now?: () => string;
 };
+
+type ReviewedImplementationTarget = {
+  artifactContentId?: string;
+  artifactRecordId?: string;
+  summary: string;
+  targetPath: string;
+};
+
+type ReviewedDeliveryEvidence = {
+  blockers: string[];
+  deliveryArtifact?: RuntimeArtifactContent;
+  implementationTargets: readonly ReviewedImplementationTarget[];
+  packet?: ReviewPacket;
+};
+
+const IMPLEMENTATION_PREVIEW_TARGET_PATH = "apps/web/src/generated/mission-implementation-preview.ts";
+const IMPLEMENTATION_SURFACE_TARGET_PREFIX = "apps/web/src/generated/implementation-surfaces/";
 
 export class GitOperationService {
   private readonly now: () => string;
@@ -98,7 +118,7 @@ export class GitOperationService {
         return operation;
       }
       if (review.packet) {
-        executionRequest = await this.attachReviewedDeliveryToDraftPr(executionRequest, review.packet);
+        executionRequest = this.attachReviewedDeliveryToDraftPr(executionRequest, review);
       }
     }
 
@@ -181,40 +201,82 @@ export class GitOperationService {
     };
   }
 
-  private async resolveReviewedDelivery(input: GitOperationRequest): Promise<{ packet?: ReviewPacket; blockers: string[] }> {
-    if (!resultNeedsReviewedDelivery(input.kind)) return { blockers: [] };
-    if (!this.options.reviewPacketStore) return { blockers: ["Review packet store is not configured for remote mutation policy."] };
-    if (!input.reviewPacketId?.trim()) return { blockers: ["Explicit reviewPacketId is required before remote mutation."] };
+  private async resolveReviewedDelivery(input: GitOperationRequest): Promise<ReviewedDeliveryEvidence> {
+    if (!resultNeedsReviewedDelivery(input.kind)) return { blockers: [], implementationTargets: [] };
+    if (!this.options.reviewPacketStore) return { blockers: ["Review packet store is not configured for remote mutation policy."], implementationTargets: [] };
+    if (!input.reviewPacketId?.trim()) return { blockers: ["Explicit reviewPacketId is required before remote mutation."], implementationTargets: [] };
 
     const packet = await this.options.reviewPacketStore.findPacket(input.reviewPacketId);
-    if (!packet) return { blockers: ["Review packet was not found."] };
-    if (packet.missionId !== input.missionId) return { blockers: ["Review packet belongs to a different mission."] };
-    if (packet.taskId !== input.taskId) return { blockers: ["Review packet belongs to a different task."] };
-    if (packet.status !== "delivered") return { blockers: [`Review packet status is ${packet.status}; delivered is required.`] };
-    if (!packet.deliveryArtifactContentId) return { blockers: ["Review packet has no delivery artifact content."] };
+    if (!packet) return { blockers: ["Review packet was not found."], implementationTargets: [] };
+    const blockers = [
+      ...(packet.missionId === input.missionId ? [] : ["Review packet belongs to a different mission."]),
+      ...(packet.taskId === input.taskId ? [] : ["Review packet belongs to a different task."]),
+      ...(packet.status === "delivered" ? [] : [`Review packet status is ${packet.status}; delivered is required.`]),
+      ...(packet.deliveryArtifactContentId ? [] : ["Review packet has no delivery artifact content."]),
+      ...(packet.ciRun?.status === "passed" ? [] : [`Local CI status is ${packet.ciRun?.status ?? "missing"}; passed is required before remote mutation.`]),
+      ...(hasRequiredReviewerApproval(packet) ? [] : ["Required reviewer approvals are missing before remote mutation."])
+    ];
+    const artifacts = await this.options.artifactStore.readArtifacts();
+    const deliveryArtifact = packet.deliveryArtifactContentId
+      ? artifacts.find((artifact) => artifact.id === packet.deliveryArtifactContentId)
+      : undefined;
+    const implementationTargets = await this.collectImplementationPatchTargets(packet, artifacts);
 
-    return { packet, blockers: [] };
+    if (packet.deliveryArtifactContentId && !deliveryArtifact) {
+      blockers.push("Delivery artifact content was not found.");
+    }
+
+    if (implementationTargets.length === 0) {
+      blockers.push("Implementation patch artifact evidence is required before remote mutation.");
+    }
+    if (!implementationTargets.some((target) => target.targetPath === IMPLEMENTATION_PREVIEW_TARGET_PATH)) {
+      blockers.push("Implementation preview manifest evidence is required before remote mutation.");
+    }
+    if (!implementationTargets.some((target) => target.targetPath.startsWith(IMPLEMENTATION_SURFACE_TARGET_PREFIX))) {
+      blockers.push("Implementation surface module evidence is required before remote mutation.");
+    }
+
+    return {
+      blockers,
+      ...(deliveryArtifact ? { deliveryArtifact } : {}),
+      implementationTargets,
+      packet
+    };
   }
 
-  private async attachReviewedDeliveryToDraftPr<T extends GitOperationRequest & { id: string }>(input: T, packet: ReviewPacket): Promise<T> {
+  private async collectImplementationPatchTargets(
+    packet: ReviewPacket,
+    artifacts: readonly RuntimeArtifactContent[]
+  ): Promise<ReviewedImplementationTarget[]> {
+    const evidenceArtifactIds = new Set(packet.evidence.artifactContentIds);
+    const artifactTargets = artifacts
+      .filter((artifact) => artifact.missionId === packet.missionId && artifact.taskId === packet.taskId && evidenceArtifactIds.has(artifact.id))
+      .map((artifact) => implementationTargetFromArtifact(artifact))
+      .filter((target): target is ReviewedImplementationTarget => Boolean(target));
+
+    const callTargets = this.options.toolCallStore
+      ? (await this.options.toolCallStore.listToolCalls(packet.missionId))
+        .filter((call) => call.taskId === packet.taskId && isImplementationPatchToolCall(call, evidenceArtifactIds))
+        .map((call): ReviewedImplementationTarget => ({
+          ...(call.artifactContentId ? { artifactContentId: call.artifactContentId } : {}),
+          ...(call.artifactRecordId ? { artifactRecordId: call.artifactRecordId } : {}),
+          summary: call.result?.summary ?? "Implementation patch file write completed.",
+          targetPath: call.targetPath ?? "unknown"
+        }))
+      : [];
+
+    return uniqueTargets([...callTargets, ...artifactTargets]);
+  }
+
+  private attachReviewedDeliveryToDraftPr<T extends GitOperationRequest & { id: string }>(input: T, review: ReviewedDeliveryEvidence): T {
     if (input.kind !== "draft_pr_create" || input.pullRequestBody?.trim()) return input;
-    if (!packet.deliveryArtifactContentId) return input;
+    if (!review.packet || !review.deliveryArtifact) return input;
 
-    const deliveryArtifact = (await this.options.artifactStore.readArtifacts()).find((artifact) => artifact.id === packet.deliveryArtifactContentId);
-    if (!deliveryArtifact) return input;
-
-    const safetyNotes = [
-      "## Remote Safety",
-      "- Draft PR creation only; merge remains a human decision.",
-      "- Force push remains disabled.",
-      "- Branch deletion remains disabled.",
-      "- Deployment and production actions remain disabled."
-    ].join("\n");
-    const body = [deliveryArtifact.markdown, "", safetyNotes].join("\n").slice(0, 60_000);
+    const body = createDraftPullRequestBody(review).slice(0, 60_000);
 
     return {
       ...input,
-      pullRequestTitle: input.pullRequestTitle?.trim() || `Draft PR: ${deliveryArtifact.title}`,
+      pullRequestTitle: input.pullRequestTitle?.trim() || `Draft PR: ${review.deliveryArtifact.title}`,
       pullRequestBody: body
     };
   }
@@ -311,6 +373,110 @@ export class GitOperationService {
 
 function shouldCreateArtifact(operation: GitOperationRecord, result: GitOperationResult): boolean {
   return operation.kind === "diff" || operation.kind === "commit_plan" || operation.kind === "pr_draft" || operation.kind === "local_commit" || operation.kind === "remote_health" || operation.kind === "remote_evidence" || operation.kind === "branch_push_policy" || operation.kind === "draft_pr_policy" || operation.kind === "branch_push" || operation.kind === "draft_pr_create" || Boolean(result.diff?.diff);
+}
+
+function hasRequiredReviewerApproval(packet: ReviewPacket): boolean {
+  return packet.requiredReviewerRoleIds.length > 0 &&
+    packet.requiredReviewerRoleIds.every((roleId) =>
+      packet.reviews.some((review) => review.reviewerRoleId === roleId && review.decision === "pass")
+    );
+}
+
+function isImplementationPatchToolCall(call: ToolCallRecord, evidenceArtifactIds: Set<string>): boolean {
+  if (call.kind !== "file_write" || call.status !== "completed" || !call.targetPath) return false;
+  if (call.artifactContentId && !evidenceArtifactIds.has(call.artifactContentId)) return false;
+  return isImplementationPatchTargetPath(call.targetPath);
+}
+
+function implementationTargetFromArtifact(artifact: RuntimeArtifactContent): ReviewedImplementationTarget | undefined {
+  if (artifact.source !== "tool_runner" || artifact.title !== "Local Code Patch") return undefined;
+  const targetPath = extractToolTargetPath(artifact);
+  if (!targetPath || !isImplementationPatchTargetPath(targetPath)) return undefined;
+  return {
+    artifactContentId: artifact.id,
+    artifactRecordId: artifact.artifactRecordId,
+    summary: artifact.summary,
+    targetPath
+  };
+}
+
+function extractToolTargetPath(artifact: RuntimeArtifactContent): string | undefined {
+  for (const section of artifact.sections) {
+    for (const evidence of section.evidence) {
+      if (evidence.startsWith("Target: ")) return evidence.slice("Target: ".length).trim();
+    }
+  }
+  return undefined;
+}
+
+function isImplementationPatchTargetPath(targetPath: string): boolean {
+  return targetPath === IMPLEMENTATION_PREVIEW_TARGET_PATH ||
+    (targetPath.startsWith(IMPLEMENTATION_SURFACE_TARGET_PREFIX) && targetPath.endsWith("-surface.ts"));
+}
+
+function uniqueTargets(targets: readonly ReviewedImplementationTarget[]): ReviewedImplementationTarget[] {
+  const byPath = new Map<string, ReviewedImplementationTarget>();
+  for (const target of targets) {
+    const previous = byPath.get(target.targetPath);
+    const artifactContentId = target.artifactContentId ?? previous?.artifactContentId;
+    const artifactRecordId = target.artifactRecordId ?? previous?.artifactRecordId;
+    byPath.set(target.targetPath, {
+      summary: target.summary,
+      targetPath: target.targetPath,
+      ...(artifactContentId ? { artifactContentId } : {}),
+      ...(artifactRecordId ? { artifactRecordId } : {})
+    });
+  }
+  return [...byPath.values()].sort((left, right) => left.targetPath.localeCompare(right.targetPath));
+}
+
+function createDraftPullRequestBody(review: ReviewedDeliveryEvidence): string {
+  const packet = review.packet;
+  const delivery = review.deliveryArtifact;
+  if (!packet || !delivery) return "";
+
+  const previewTargets = review.implementationTargets.filter((target) => target.targetPath === IMPLEMENTATION_PREVIEW_TARGET_PATH);
+  const surfaceTargets = review.implementationTargets.filter((target) => target.targetPath.startsWith(IMPLEMENTATION_SURFACE_TARGET_PREFIX));
+  const bodySections = [
+    delivery.markdown,
+    "",
+    "## Implementation Patch",
+    ...review.implementationTargets.map((target) => formatTargetEvidence(target)),
+    "",
+    "## Rendered Preview",
+    ...(previewTargets.length > 0 ? previewTargets.map((target) => `- Preview manifest: ${target.targetPath}`) : ["- Preview manifest: missing"]),
+    ...(surfaceTargets.length > 0 ? surfaceTargets.map((target) => `- Surface module: ${target.targetPath}`) : ["- Surface module: missing"]),
+    "",
+    "## CI Evidence",
+    `- Profile: ${packet.ciRun?.profileId ?? "missing"}`,
+    `- Status: ${packet.ciRun?.status ?? "missing"}`,
+    ...(packet.ciRun?.commands.map((command) => `- ${command.command}: ${command.status} (${command.toolCallId})`) ?? []),
+    "",
+    "## Review Evidence",
+    ...packet.requiredReviewerRoleIds.map((roleId) => {
+      const reviewRecord = packet.reviews.find((item) => item.reviewerRoleId === roleId);
+      return `- ${roleId}: ${reviewRecord?.decision ?? "missing"}${reviewRecord ? ` - ${reviewRecord.summary}` : ""}`;
+    }),
+    "",
+    "## Delivery Evidence",
+    `- Review packet: ${packet.id}`,
+    `- Delivery artifact: ${delivery.id}`,
+    "",
+    "## Remote Safety",
+    "- Draft PR creation only; merge remains a human decision.",
+    "- Force push remains disabled.",
+    "- Branch deletion remains disabled.",
+    "- Deployment and production actions remain disabled."
+  ];
+
+  return bodySections.join("\n");
+}
+
+function formatTargetEvidence(target: ReviewedImplementationTarget): string {
+  const ids = [target.artifactContentId ? `artifact ${target.artifactContentId}` : "", target.artifactRecordId ? `record ${target.artifactRecordId}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  return `- ${target.targetPath}${ids ? ` (${ids})` : ""}: ${target.summary}`;
 }
 
 function artifactIdForOperation(operation: GitOperationRecord): string {

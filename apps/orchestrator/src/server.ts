@@ -479,7 +479,8 @@ export function createDefaultGitOperationService(
   store: MissionStore,
   artifactStore: ArtifactContentStore,
   gitOperationStore: GitOperationStore,
-  reviewPacketStore?: ReviewPacketStore
+  reviewPacketStore?: ReviewPacketStore,
+  toolCallStore?: ToolCallStore
 ): GitOperationService {
   const runner = new LocalGitRunner({
     workspaceRoot: process.env.TEAM_AI_AGENT_WORKSPACE_ROOT ?? process.cwd(),
@@ -496,7 +497,8 @@ export function createDefaultGitOperationService(
     operationStore: gitOperationStore,
     missionStore: store,
     artifactStore,
-    ...(reviewPacketStore ? { reviewPacketStore } : {})
+    ...(reviewPacketStore ? { reviewPacketStore } : {}),
+    ...(toolCallStore ? { toolCallStore } : {})
   });
 }
 
@@ -623,7 +625,7 @@ if (isEntrypoint) {
   const missionHistoryStore = createDefaultFileMissionHistoryStore();
   const toolCallService = createDefaultToolCallService(store, artifactStore, toolCallStore);
   const agentRunService = createDefaultAgentRunService(store, artifactStore, runStore);
-  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore, reviewPacketStore);
+  const gitOperationService = createDefaultGitOperationService(store, artifactStore, gitOperationStore, reviewPacketStore, toolCallStore);
   const reviewPacketService = createDefaultReviewPacketService(
     store,
     artifactStore,

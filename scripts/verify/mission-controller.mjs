@@ -96,6 +96,13 @@ try {
   const autoGitOperations = await autoHandoffStack.gitOperationStore.listOperations(autoMission);
   assert(autoGitOperations.some((operation) => operation.kind === "branch_push" && operation.status === "completed"), "Auto handoff fixture should execute branch push through the Git operation service.");
   assert(autoGitOperations.some((operation) => operation.kind === "draft_pr_create" && operation.status === "completed"), "Auto handoff fixture should execute draft PR creation through the Git operation service.");
+  const autoDraftPr = autoGitOperations.find((operation) => operation.kind === "draft_pr_create" && operation.status === "completed");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Implementation Patch"), "Auto handoff draft PR should include implementation patch evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Rendered Preview"), "Auto handoff draft PR should include rendered preview evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## CI Evidence"), "Auto handoff draft PR should include CI evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Review Evidence"), "Auto handoff draft PR should include reviewer evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Delivery Evidence"), "Auto handoff draft PR should include delivery evidence.");
+  assert(autoDraftPr?.result?.draftPullRequest?.body.includes("## Remote Safety"), "Auto handoff draft PR should keep remote safety notes.");
   const autoSession = await autoHandoffStack.missionStore.readSession();
   assert(autoSession.auditEvents.some((event) => event.action === "automation_handoff_execution_started"), "Auto handoff fixture should audit execution start.");
   assert(autoSession.auditEvents.some((event) => event.action === "automation_handoff_execution_completed"), "Auto handoff fixture should audit execution completion.");
@@ -198,7 +205,8 @@ function createStack(name, options = {}) {
       operationStore: gitOperationStore,
       missionStore,
       artifactStore,
-      reviewPacketStore: packetStore
+      reviewPacketStore: packetStore,
+      toolCallStore
     });
   const reviewPacketService = new ReviewPacketService({ packetStore, missionStore, artifactStore, toolCallStore, gitOperationStore, toolCallService });
   const agentRunService = new AgentRunService({
@@ -399,6 +407,33 @@ function gitResultForAutoHandoff(kind, fixture) {
     };
   }
   if (kind === "draft_pr_create") {
+    const body = [
+      "## Verification",
+      "Fixture reviewed delivery.",
+      "",
+      "## Implementation Patch",
+      "- apps/web/src/generated/mission-implementation-preview.ts (artifact fixture-preview): fixture preview manifest",
+      "- apps/web/src/generated/implementation-surfaces/workflow-surface.ts (artifact fixture-surface): fixture workflow surface",
+      "",
+      "## Rendered Preview",
+      "- Preview manifest: apps/web/src/generated/mission-implementation-preview.ts",
+      "- Surface module: apps/web/src/generated/implementation-surfaces/workflow-surface.ts",
+      "",
+      "## CI Evidence",
+      "- Status: passed",
+      "",
+      "## Review Evidence",
+      "- tech_lead: pass",
+      "- qa_lead: pass",
+      "- lead_ba: pass",
+      "",
+      "## Delivery Evidence",
+      "- Review packet: fixture-review-packet",
+      "- Delivery artifact: fixture-delivery",
+      "",
+      "## Remote Safety",
+      "Merge remains manual."
+    ].join("\n");
     return {
       ...base,
       summary: `Created draft PR for ${fixture.branchName} into main.`,
@@ -407,7 +442,7 @@ function gitResultForAutoHandoff(kind, fixture) {
         url: "https://github.com/phetjaaeiei/AI-Agent/pull/456",
         number: 456,
         title: "Draft PR: Auto handoff fixture",
-        body: "## Verification\nFixture reviewed delivery.\n\n## Remote Safety\nMerge remains manual.",
+        body,
         baseBranch: "main",
         headBranch: fixture.branchName,
         remoteTarget: "phetjaaeiei/AI-Agent",

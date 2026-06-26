@@ -297,6 +297,7 @@ async function createStack(name, { allowGitRead = true, handoffGitMode = "none" 
     missionStore,
     artifactStore,
     reviewPacketStore,
+    toolCallStore,
     now: clock
   });
   const reviewPacketService = new ReviewPacketService({
@@ -567,6 +568,14 @@ function createAutoHandoffGitRunner(workspaceRoot, clock, mode = "completed") {
       }
       if (request.kind === "draft_pr_create") {
         const policyResult = remoteMutationPolicy("draft_pr");
+        const title = request.pullRequestTitle?.trim() || "Draft PR: Rendered auto handoff fixture";
+        const body = request.pullRequestBody?.trim() || [
+          "## Verification",
+          "Rendered QA fixture completed bounded remote handoff.",
+          "",
+          "## Remote Safety",
+          "Merge remains manual."
+        ].join("\n");
         return {
           summary: `Created draft PR for ${branchName} into main.`,
           evidence: [`PR: https://github.com/phetjaaeiei/AI-Agent/pull/789`, "Draft: true", "Base: main", `Head: ${branchName}`],
@@ -578,8 +587,8 @@ function createAutoHandoffGitRunner(workspaceRoot, clock, mode = "completed") {
           draftPullRequest: {
             url: "https://github.com/phetjaaeiei/AI-Agent/pull/789",
             number: 789,
-            title: "Draft PR: Rendered auto handoff fixture",
-            body: "## Verification\nRendered QA fixture completed bounded remote handoff.\n\n## Remote Safety\nMerge remains manual.",
+            title,
+            body,
             baseBranch: "main",
             headBranch: branchName,
             remoteTarget: "phetjaaeiei/AI-Agent",

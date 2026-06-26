@@ -89,6 +89,14 @@ P10.2 reused the same full sweep on 2026-06-26 and added focused assertions for 
 
 P10.3 reused the same full sweep on 2026-06-26 and added focused assertions for implementation patch policy allow/deny behavior, two-target controller writes, generated dashboard/workflow surface modules, recovered history counts, and rendered preview recovery from the latest targeted patch artifact.
 
+P10.4 links implementation patch evidence to guarded remote handoff:
+
+- remote branch push and draft PR creation now require delivered review evidence, passing local CI, required reviewer approvals, delivery artifact content, preview manifest patch evidence, and generated surface module patch evidence;
+- draft PR body hydration includes delivery Markdown, implementation target paths/artifact ids, rendered preview references, CI command results, reviewer decisions, delivery ids, and remote safety notes;
+- automatic merge, production deployment, force push, branch deletion, destructive Git, and deploy actions remain outside automation.
+
+P10.4 reused the same full sweep on 2026-06-26 and added focused assertions for implementation evidence requirements, hydrated draft PR content, committed remote mutation fixtures, and rendered handoff compatibility.
+
 ## Next Slices
 
-- P10.4: feed implementation patch, preview, CI, review, and delivery evidence into guarded remote handoff and draft PR content.
+- Define the next phase for broader implementation patch generation while preserving the Phase 10 policy, review, CI, delivery, and remote handoff boundaries.

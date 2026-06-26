@@ -51,7 +51,8 @@ const gitService = new GitOperationService({
   operationStore: gitOperationStore,
   missionStore,
   artifactStore,
-  reviewPacketStore: packetStore
+  reviewPacketStore: packetStore,
+  toolCallStore
 });
 const reviewService = new ReviewPacketService({ packetStore, missionStore, artifactStore, toolCallStore, gitOperationStore, toolCallService });
 const missionId = (await missionStore.readSession()).missionId;
@@ -72,6 +73,25 @@ try {
     });
     assert(operation.status === "completed", `${kind} evidence should complete.`);
   }
+
+  const implementationManifest = await toolCallService.executeToolCall({
+    missionId,
+    taskId: "task-review",
+    roleId: "frontend_developer",
+    kind: "file_write",
+    targetPath: "apps/web/src/generated/mission-implementation-preview.ts",
+    content: "export const missionImplementationPreview = { title: \"Review fixture preview\" } as const;\n"
+  });
+  const implementationSurface = await toolCallService.executeToolCall({
+    missionId,
+    taskId: "task-review",
+    roleId: "frontend_developer",
+    kind: "file_write",
+    targetPath: "apps/web/src/generated/implementation-surfaces/workflow-surface.ts",
+    content: "export const generatedImplementationSurface = { kind: \"workflow\", title: \"Review fixture surface\" } as const;\n"
+  });
+  assert(implementationManifest.status === "completed" && implementationManifest.artifactContentId, "Review fixture should attach implementation preview manifest evidence.");
+  assert(implementationSurface.status === "completed" && implementationSurface.artifactContentId, "Review fixture should attach implementation surface evidence.");
 
   const created = await reviewService.createPacket({ missionId, taskId: "task-review", roleId: "tech_lead" });
   assert(created.status === "draft", "A packet without CI and reviewer approvals should remain draft.");
@@ -117,7 +137,7 @@ try {
   assert(pushPolicy.result?.remoteMutationPolicy?.allowed === false, "Branch push policy should remain blocked while remote push permission is disabled.");
 
   await git(["switch", "-c", "codex/review-policy"]);
-  await git(["add", "src/app.ts"]);
+  await git(["add", "src/app.ts", "apps/web/src/generated/mission-implementation-preview.ts", "apps/web/src/generated/implementation-surfaces/workflow-surface.ts"]);
   await git(["commit", "-m", "Update review policy fixture"]);
   await git(["remote", "set-url", "origin", "https://github.com/phetjaaeiei/AI-Agent.git"]);
   await git(["config", `url.${remote}.insteadOf`, "https://github.com/phetjaaeiei/AI-Agent.git"]);
@@ -153,7 +173,8 @@ try {
       operationStore: remoteMutationStore,
       missionStore,
       artifactStore,
-      reviewPacketStore: packetStore
+      reviewPacketStore: packetStore,
+      toolCallStore
     });
 
     const branchPush = await remoteMutationService.executeOperation({
@@ -185,6 +206,12 @@ try {
     assert(draftPr.result?.draftPullRequest?.url === "https://github.com/phetjaaeiei/AI-Agent/pull/123", "Draft PR result should record the created URL.");
     assert(draftPr.result?.draftPullRequest?.draft === true, "Draft PR result should stay draft-only.");
     assert(draftPr.result?.draftPullRequest?.body.includes("## Verification"), "Draft PR body should include delivery verification Markdown.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("## Implementation Patch"), "Draft PR body should include implementation patch evidence.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("apps/web/src/generated/mission-implementation-preview.ts"), "Draft PR body should include preview manifest target evidence.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("apps/web/src/generated/implementation-surfaces/workflow-surface.ts"), "Draft PR body should include surface module target evidence.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("## CI Evidence"), "Draft PR body should include CI evidence.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("## Review Evidence"), "Draft PR body should include reviewer evidence.");
+    assert(draftPr.result?.draftPullRequest?.body.includes("## Delivery Evidence"), "Draft PR body should include delivery evidence.");
     assert(draftPr.result?.draftPullRequest?.body.includes("## Remote Safety"), "Draft PR body should include remote safety notes.");
     assert(draftPr.result?.remoteMutationPolicy?.forcePushAllowed === false, "Draft PR creation should keep force push disabled.");
     assert(draftPr.artifactContentId, "Draft PR creation should create evidence artifact.");
@@ -253,6 +280,7 @@ function createFixtureToolRunner(workspaceRoot, failingCommand) {
     getPolicy: () => runner.getPolicy(),
     evaluate: (request) => runner.evaluate(request),
     execute: async (request) => {
+      if (request.kind === "file_write") return runner.execute(request);
       const failed = request.command === failingCommand;
       return {
         summary: failed ? `${request.command} failed in the fixture.` : `${request.command} passed in the fixture.`,

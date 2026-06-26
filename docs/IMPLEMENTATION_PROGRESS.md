@@ -1028,7 +1028,45 @@
   - `npm run build:web`;
   - `git diff --check`.
 
+### Phase 10 Human Approval And Remote Handoff Link
+
+- Completed P10.4 by tightening the remote mutation handoff boundary:
+  - branch push and draft PR creation now require delivered review evidence, passing local CI, required reviewer approvals, and delivery artifact content before execution;
+  - the same remote mutation resolver now also requires implementation patch evidence for both the preview manifest and one generated surface module;
+  - `GitOperationService` can resolve implementation `file_write` evidence through the `ToolCallStore`, with artifact fallback for archived packet evidence;
+  - the default server wires `toolCallStore` into the Git operation service.
+- Draft PR body hydration now carries the full reviewed handoff packet:
+  - delivery report Markdown;
+  - implementation patch target paths and artifact ids;
+  - rendered preview manifest and surface module references;
+  - local CI profile and command results;
+  - required reviewer decisions;
+  - delivery packet and artifact ids;
+  - remote safety notes that keep merge, force push, branch deletion, deployment, and production actions outside automation.
+- Extended verification:
+  - review-packet verification now creates committed implementation patch evidence before exercising enabled branch push and draft PR creation;
+  - mission-controller verification asserts auto-handoff draft PR content includes patch, preview, CI, review, delivery, and remote safety sections;
+  - rendered QA remote handoff fixture now preserves hydrated draft PR title/body from the Git operation request.
+- Focused verification passed:
+  - `npm run typecheck`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`.
+- Full Phase 10 P10.4 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Continue Phase 10 with human approval and remote handoff link.
+- Continue with the next implementation phase after the Phase 10 full verification sweep.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

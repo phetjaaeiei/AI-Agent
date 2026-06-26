@@ -91,6 +91,7 @@ const gitOperationService = new GitOperationService({
   missionStore: store,
   artifactStore,
   reviewPacketStore,
+  toolCallStore,
   now: () => "2026-06-18T10:32:00.000Z"
 });
 const reviewPacketService = new ReviewPacketService({

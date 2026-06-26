@@ -29,8 +29,8 @@ Mission Control
 - `remote_evidence`: reads branch publication, remote commit, PR status, check summary, retry reason, and blocked remote actions without mutating the remote.
 - `branch_push_policy`: evaluates future branch-push readiness without pushing. It records actor, `codex/*` branch, commit SHA, remote target, permission state, reviewed delivery evidence, blockers, force-push disabled state, and branch-deletion disabled state.
 - `draft_pr_policy`: evaluates future draft-PR readiness without creating a PR. It uses the same reviewed delivery and branch policy checks while honoring separate PR creation permission.
-- `branch_push`: pushes the current clean `codex/*` branch to `origin` with upstream tracking only when remote push permission, reviewed delivery evidence, branch policy, remote health, and worktree checks all pass. It never force-pushes and never deletes branches.
-- `draft_pr_create`: creates a GitHub draft pull request with `gh pr create --draft` only when PR creation permission, reviewed delivery evidence, branch policy, remote health, and remote branch commit checks all pass. The PR body is hydrated from the reviewed delivery Markdown and adds remote safety notes.
+- `branch_push`: pushes the current clean `codex/*` branch to `origin` with upstream tracking only when remote push permission, reviewed delivery evidence, passing local CI, required reviewer approvals, implementation patch evidence, branch policy, remote health, and worktree checks all pass. It never force-pushes and never deletes branches.
+- `draft_pr_create`: creates a GitHub draft pull request with `gh pr create --draft` only when PR creation permission, reviewed delivery evidence, passing local CI, required reviewer approvals, implementation patch evidence, branch policy, remote health, and remote branch commit checks all pass. The PR body is hydrated from reviewed delivery Markdown plus implementation patch, rendered preview, CI, review, delivery, and remote safety evidence.
 
 ## Default Policy
 
@@ -58,7 +58,7 @@ Runtime env switches:
 - `TEAM_AI_AGENT_GIT_TIMEOUT_MS=30000`
 - `TEAM_AI_AGENT_GIT_MAX_DIFF_BYTES=120000`
 
-Remote mutation operations also require an explicit `reviewPacketId` whose packet belongs to the same mission/task, is `delivered`, and has a delivery artifact content id. Draft PR creation verifies that the remote `codex/*` branch exists and matches the local HEAD before invoking GitHub CLI.
+Remote mutation operations also require an explicit `reviewPacketId` whose packet belongs to the same mission/task, is `delivered`, has passing local CI, has every required reviewer recorded as `pass`, has a delivery artifact content id, and carries implementation patch artifacts for both the preview manifest and an allowlisted generated surface module. Draft PR creation verifies that the remote `codex/*` branch exists and matches the local HEAD before invoking GitHub CLI.
 
 ## API
 

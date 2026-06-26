@@ -92,6 +92,7 @@ const gitOperationService = new GitOperationService({
   missionStore,
   artifactStore,
   reviewPacketStore,
+  toolCallStore,
   now: clock
 });
 const reviewPacketService = new ReviewPacketService({
