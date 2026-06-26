@@ -236,7 +236,12 @@ try {
   assert(agentRuns[0]?.verification?.decision === "pass", "Planning agent verification should pass.");
 
   const toolCalls = await requestJson(`${baseUrl}/api/mission/tool-calls?missionId=${encodeURIComponent(persistedMission.missionId)}`);
+  const implementationCalls = toolCalls.filter((call) => call.kind === "file_write");
   const commandCalls = toolCalls.filter((call) => call.kind === "test_command");
+  assert(implementationCalls.length === 1, "Controller should create one bounded implementation file_write patch.");
+  assert(implementationCalls[0]?.status === "completed", "Implementation file_write should complete.");
+  assert(implementationCalls[0]?.targetPath === "apps/web/src/generated/mission-implementation-preview.ts", "Implementation patch should target the generated preview module.");
+  assert(Boolean(implementationCalls[0]?.artifactContentId), "Implementation file_write should create a local code patch artifact.");
   assert(commandCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 1, "Controller should collect typecheck plus the default local CI command profile.");
   assert(commandCalls.every((call) => call.status === "completed"), "All deterministic test command calls should complete.");
   assert(new Set(commandCalls.map((call) => call.command)).has("npm run typecheck"), "Tool evidence should include the controller typecheck command.");
@@ -276,7 +281,7 @@ try {
   const deliveredHistory = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(deliveredArchive.id)}`);
   assert(deliveredHistory.controller.status === "completed", "Delivered history should recover the completed controller.");
   assert(deliveredHistory.agentRuns.length === 1, "Delivered history should recover the planning run.");
-  assert(deliveredHistory.toolCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 1, "Delivered history should recover tool evidence.");
+  assert(deliveredHistory.toolCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 2, "Delivered history should recover implementation patch and tool evidence.");
   assert(deliveredHistory.gitOperations.length === 6, "Delivered history should recover Git evidence and handoff policy preflight.");
   assert(deliveredHistory.reviewPackets[0]?.status === "delivered", "Delivered history should recover delivered review evidence.");
   assert(deliveredHistory.artifactContents.some((artifact) => artifact.id === completed.deliveryArtifactContentId), "Delivered history should recover the delivery artifact.");
@@ -293,7 +298,7 @@ try {
   const recoveredAfterReset = await requestJson(`${baseUrl}/api/mission/history/${encodeURIComponent(deliveredArchive.id)}`);
   assert(recoveredAfterReset.command === command, "Recovered history should preserve the user-entered command after reset.");
   assert(recoveredAfterReset.controller.status === "completed", "Recovered history should preserve controller completion after reset.");
-  assert(recoveredAfterReset.toolCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 1, "Recovered history should preserve tool evidence after reset.");
+  assert(recoveredAfterReset.toolCalls.length === DEFAULT_LOCAL_CI_COMMANDS.length + 2, "Recovered history should preserve implementation patch and tool evidence after reset.");
   assert(recoveredAfterReset.gitOperations.every((operation) => !["local_commit", "branch_push", "draft_pr_create"].includes(operation.kind)), "Recovered history must not include mutation operations.");
 } finally {
   await new Promise((resolveClose) => server.close(resolveClose));
@@ -314,14 +319,17 @@ function createFixtureToolRunner(workspaceRoot) {
   return {
     getPolicy: () => policyRunner.getPolicy(),
     evaluate: (request) => policyRunner.evaluate(request),
-    execute: async (request) => ({
-      summary: `${request.command} passed in the Phase 8 E2E fixture.`,
-      evidence: [`Command: ${request.command}`, "Fixture exit code: 0"],
-      durationMs: 1,
-      exitCode: 0,
-      stdout: "verification passed",
-      stderr: ""
-    })
+    execute: async (request) => {
+      if (request.kind === "file_write") return policyRunner.execute(request);
+      return {
+        summary: `${request.command} passed in the Phase 8 E2E fixture.`,
+        evidence: [`Command: ${request.command}`, "Fixture exit code: 0"],
+        durationMs: 1,
+        exitCode: 0,
+        stdout: "verification passed",
+        stderr: ""
+      };
+    }
   };
 }
 

@@ -21,6 +21,7 @@ import { RemoteHandoffExecutionCard } from "./RemoteHandoffExecutionCard.js";
 
 const missionControllerStages: readonly MissionControllerStage[] = [
   "planning",
+  "implementation_patch",
   "tool_evidence",
   "git_evidence",
   "review_packet",

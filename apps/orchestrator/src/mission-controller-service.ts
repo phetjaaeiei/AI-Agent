@@ -51,6 +51,7 @@ type MissionControllerServiceOptions = {
 };
 
 const REVIEWER_ROLES: readonly RoleId[] = ["tech_lead", "qa_lead", "lead_ba"];
+const IMPLEMENTATION_PREVIEW_PATH = "apps/web/src/generated/mission-implementation-preview.ts";
 
 type HandoffExecutionResult = {
   blocked: number;
@@ -206,6 +207,7 @@ export class MissionControllerService {
         updatedAt: this.now()
       });
       controller = await this.runPlanning(controller, abortController.signal);
+      controller = await this.runImplementationPatch(controller, abortController.signal);
       controller = await this.runToolEvidence(controller, abortController.signal);
       controller = await this.runGitEvidence(controller, abortController.signal);
       controller = await this.runReviewPacket(controller, abortController.signal);
@@ -264,6 +266,24 @@ export class MissionControllerService {
       throw new ControllerStopError("planning_blocked", "planning", terminal.errorSummary ?? `Planning ended with ${terminal.status}.`, [terminal.id]);
     }
     return this.completeStage(controller, "planning", `Planning completed with ${terminal.provider}.`, [terminal.id, ...(terminal.outputArtifactId ? [terminal.outputArtifactId] : [])]);
+  }
+
+  private async runImplementationPatch(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
+    controller = await this.beginStage(controller, "implementation_patch", "Writing a bounded local implementation patch.");
+    this.assertActive(controller, signal);
+    const generatedAt = this.now();
+    const call = await this.options.toolCallService.executeToolCall({
+      missionId: controller.missionId,
+      taskId: controller.taskId,
+      roleId: "frontend_developer",
+      kind: "file_write",
+      targetPath: IMPLEMENTATION_PREVIEW_PATH,
+      content: createImplementationPreviewSource(controller.command, generatedAt)
+    });
+    if (call.status !== "completed") {
+      throw new ControllerStopError("implementation_failed", "implementation_patch", call.errorSummary ?? "Implementation patch did not complete.", [call.id]);
+    }
+    return this.completeStage(controller, "implementation_patch", `Implementation patch wrote ${IMPLEMENTATION_PREVIEW_PATH}.`, [call.id, ...(call.artifactContentId ? [call.artifactContentId] : [])]);
   }
 
   private async runToolEvidence(controller: MissionControllerRecord, signal: AbortSignal): Promise<MissionControllerRecord> {
@@ -739,6 +759,75 @@ function upsertStageResult(results: readonly MissionControllerStageResult[], nex
 
 function isTerminal(status: MissionControllerRecord["status"]): boolean {
   return ["completed", "blocked", "failed", "cancelled"].includes(status);
+}
+
+function createImplementationPreviewSource(command: string, generatedAt: string): string {
+  const normalizedCommand = command.trim().replace(/\s+/g, " ");
+  const isLandingPage = /\b(landing|homepage|marketing|hero|webapp|launch)\b/i.test(normalizedCommand);
+  const title = isLandingPage ? "Team AI Agent Landing Page" : "Mission Implementation Preview";
+  const summary = isLandingPage
+    ? "Generated landing-page preview content for the Team AI Agent web app, ready for review and rendered QA wiring."
+    : "Generated implementation preview content from the current mission command, ready for review and test evidence.";
+  const sections = isLandingPage
+    ? [
+      {
+        label: "Hero",
+        summary: "Position Team AI Agent as a local-first AI company control room with one mission intake and inspectable execution evidence."
+      },
+      {
+        label: "Proof",
+        summary: "Show planning, implementation patch, tests, review packet, delivery report, and handoff policy as visible checkpoints."
+      },
+      {
+        label: "Action",
+        summary: "Invite operators to save a mission, run local agents, inspect artifacts, and keep merge or deployment manual."
+      }
+    ]
+    : [
+      {
+        label: "Implementation",
+        summary: "Create a bounded local patch through the tool-runner file_write policy before collecting Git evidence."
+      },
+      {
+        label: "Verification",
+        summary: "Feed the generated patch into typecheck, local CI, reviewer decisions, delivery report, and mission history recovery."
+      },
+      {
+        label: "Safety",
+        summary: "Keep the change local and reviewable; remote push, PR creation, merge, and deploy stay behind policy gates."
+      }
+    ];
+  const preview = {
+    schemaVersion: 1,
+    generatedAt,
+    source: "mission_controller",
+    command: normalizedCommand || "No mission command provided.",
+    title,
+    summary,
+    targetPath: IMPLEMENTATION_PREVIEW_PATH,
+    sections
+  };
+
+  return [
+    "export type MissionImplementationPreviewSection = {",
+    "  label: string;",
+    "  summary: string;",
+    "};",
+    "",
+    "export type MissionImplementationPreview = {",
+    "  schemaVersion: 1;",
+    "  generatedAt: string;",
+    "  source: \"mission_controller\" | \"seed\";",
+    "  command: string;",
+    "  title: string;",
+    "  summary: string;",
+    "  targetPath: string;",
+    "  sections: readonly MissionImplementationPreviewSection[];",
+    "};",
+    "",
+    `export const missionImplementationPreview: MissionImplementationPreview = ${JSON.stringify(preview, null, 2)};`,
+    ""
+  ].join("\n");
 }
 
 function slugForBranch(value: string): string {

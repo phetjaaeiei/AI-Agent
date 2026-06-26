@@ -2300,6 +2300,115 @@ button:focus-visible {
   color: var(--red);
 }
 
+.implementation-preview-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.implementation-preview-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.implementation-preview-heading > span {
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: 4px 7px;
+  color: var(--primary-deep);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.implementation-preview-body {
+  display: grid;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: 10px;
+}
+
+.implementation-preview-body strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.implementation-preview-body p,
+.implementation-preview-sections p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.implementation-preview-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.implementation-preview-facts span,
+.implementation-preview-command,
+.implementation-preview-sections article {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  padding: 8px;
+}
+
+.implementation-preview-facts span,
+.implementation-preview-command span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.implementation-preview-facts strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.implementation-preview-command {
+  display: grid;
+  gap: 5px;
+}
+
+.implementation-preview-command code {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.implementation-preview-sections {
+  display: grid;
+  gap: 6px;
+}
+
+.implementation-preview-sections article {
+  display: grid;
+  gap: 3px;
+}
+
+.implementation-preview-sections strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
 .controller-status {
   border-radius: var(--radius-sm);
   background: var(--white);

@@ -11,6 +11,7 @@ export const MISSION_CONTROLLER_STORE_SCHEMA_VERSION = 1;
 
 export const MISSION_CONTROLLER_STAGES = [
   "planning",
+  "implementation_patch",
   "tool_evidence",
   "git_evidence",
   "review_packet",
@@ -25,6 +26,7 @@ export type MissionControllerStatus = "queued" | "running" | "completed" | "bloc
 export type MissionControllerStageStatus = "running" | "completed" | "blocked" | "failed" | "cancelled";
 export type MissionControllerStopCode =
   | "planning_blocked"
+  | "implementation_failed"
   | "tool_failed"
   | "git_policy"
   | "git_not_ready"

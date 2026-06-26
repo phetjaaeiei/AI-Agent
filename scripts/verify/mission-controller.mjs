@@ -62,6 +62,8 @@ try {
   assert(completed.currentStage === "handoff_policy", "Complete controller should finish on the handoff policy stage.");
   assert(completed.automationDecisions?.some((decision) => decision.kind === "git_branch_push"), "Complete controller should persist branch push automation decision.");
   assert(completed.automationDecisions?.some((decision) => decision.kind === "force_push" && decision.disabled), "Complete controller should persist hard-disabled force push decision.");
+  const completeToolCalls = await completeStack.toolCallStore.listToolCalls(missionId);
+  assert(completeToolCalls.some((call) => call.kind === "file_write" && call.status === "completed" && call.artifactContentId), "Complete controller should create a local implementation patch artifact.");
   const completeGitOperations = await completeStack.gitOperationStore.listOperations(missionId);
   assert(["remote_evidence", "branch_push_policy", "draft_pr_policy"].every((kind) => completeGitOperations.some((operation) => operation.kind === kind)), "Complete controller should collect read-only handoff policy Git evidence.");
   assert(completeGitOperations.every((operation) => !["local_commit", "branch_push", "draft_pr_create"].includes(operation.kind)), "Complete controller should not commit, push, or create PRs.");
@@ -208,7 +210,7 @@ function createStack(name, options = {}) {
     maxAttempts: 2,
     reviewerRevisionLimit: 1
   });
-  return { missionStore, controllerStore, controllerService, gitOperationStore };
+  return { missionStore, controllerStore, controllerService, gitOperationStore, toolCallStore };
 }
 
 function createAutoHandoffGitOperationService(operationStore) {
@@ -413,6 +415,7 @@ function createFixtureToolRunner(failingCommand) {
     getPolicy: () => policyRunner.getPolicy(),
     evaluate: (request) => policyRunner.evaluate(request),
     execute: async (request) => {
+      if (request.kind === "file_write") return policyRunner.execute(request);
       const failed = request.command === failingCommand;
       return {
         summary: failed ? `${request.command} failed.` : `${request.command} passed.`,

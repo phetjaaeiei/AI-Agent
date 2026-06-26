@@ -913,7 +913,47 @@
 - Verification passed:
   - `node --check scripts/verify/phase8-rendered-qa.mjs`.
 
+### Phase 10 Bounded Implementation Patch Stage
+
+- Started Phase 10 Implementation Patch Loop by adding a real controller stage between planning and local evidence:
+  - added shared `implementation_patch` stage and `implementation_failed` stop code;
+  - controller now calls `ToolCallService.executeToolCall` with a policy-controlled `file_write`;
+  - the current bounded target is `apps/web/src/generated/mission-implementation-preview.ts`;
+  - the generated source records the mission command, target path, generated timestamp, and implementation sections.
+- Preserved the existing safety boundaries:
+  - the write goes through the Phase 3 local tool-runner path;
+  - denied paths, outside-workspace paths, `.env`, `.git`, `.data`, `node_modules`, `dist`, generated build folders, private-key patterns, arbitrary shell, remote Git, merge, deploy, and destructive Git remain blocked by existing policy layers;
+  - file-write failure stops the controller at `implementation_patch` with `implementation_failed` and linked evidence.
+- Added Mission Control implementation evidence:
+  - new `ImplementationPreviewCard` shows waiting seed state before a mission has generated a patch;
+  - after controller execution, the card reads the latest `Local Code Patch` artifact and shows generated patch status, target path, artifact id, and section summaries;
+  - live and recovery stage lists include `implementation_patch`.
+- Extended deterministic verification:
+  - mission-controller verification now asserts a completed `file_write` with a patch artifact;
+  - Phase 8 E2E verification now expects the implementation patch tool call before local CI commands;
+  - rendered QA now asserts waiting and generated Implementation Preview states on desktop and mobile.
+- Verification passed during the focused slice:
+  - `npm run typecheck`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run build:web`;
+  - `npm run verify:phase8-rendered`.
+- Full Phase 10 P10.1 verification sweep passed:
+  - `npm run verify:automation-policy`;
+  - `npm run typecheck`;
+  - `npm run verify:foundation`;
+  - `npm run verify:agent-runtime`;
+  - `npm run verify:tool-runner`;
+  - `npm run verify:git-runner`;
+  - `npm run verify:review-packet`;
+  - `npm run verify:mission-controller`;
+  - `npm run verify:phase8-e2e`;
+  - `npm run verify:phase8-rendered`;
+  - `npm run verify:orchestrator`;
+  - `npm run build:web`;
+  - `git diff --check`.
+
 ### Next
 
-- Run the full Phase 9 verification sweep after the blocked/failed rendered QA fixture additions.
+- Continue Phase 10 with rendered preview pipeline and targeted patch expansion beyond the generated preview module.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

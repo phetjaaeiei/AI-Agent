@@ -1,10 +1,10 @@
-# Next Implementation Plan: Phase 9 Guarded Automation
+# Next Implementation Plan: Phase 10 Implementation Patch Loop
 
-Status: Phase 9 complete through blocked/failed remote handoff rendered QA coverage
+Status: Phase 10 complete through P10.1 bounded local implementation patch
 
 ## 1. Current Position
 
-Phase 8 Real Mission Execution is complete through H5 hardening, post-H5 UI concept refresh, mission card extraction, and sidebar layout hardening.
+Phase 8 Real Mission Execution and Phase 9 Guarded Automation are complete. Phase 10 has started by giving the autonomous controller a bounded local implementation-patch stage before evidence, review, CI, delivery, and handoff policy.
 
 - Repository: `phetjaaeiei/AI-Agent`
 - Branch: `codex/phase-7-remote-mutation-policy`
@@ -12,20 +12,33 @@ Phase 8 Real Mission Execution is complete through H5 hardening, post-H5 UI conc
 - PR state: open draft
 - Merge state: clean
 
-The app can now run local-first agent planning, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication, draft PR creation, read-only remote publication evidence, and read-only recovery of previous mission runs.
+The app can now run local-first agent planning, a policy-controlled local implementation patch, local tool evidence, Git evidence, review packets, local CI, independent reviewer decisions, delivery Markdown, guarded remote branch publication policy checks, draft PR policy checks, read-only remote publication evidence, and read-only recovery of previous mission runs.
 
-The next implementation target is not "make every dangerous action automatic." The target is to add a shared automation policy that decides which actions can become bounded-auto, which actions require explicit review, which actions remain manual-only, and which actions stay hard-disabled.
-
-## 2. Phase 9 Goal
-
-Turn the current safety handoff list into policy-driven automation gates:
+The next target is not "let the agent rewrite anything." The target is a visible, bounded implementation loop:
 
 ```txt
-action request
-  -> shared automation policy
-  -> required evidence check
-  -> bounded auto / review required / manual only / disabled
-  -> visible Mission Control decision
+mission command
+  -> planning
+  -> bounded implementation patch
+  -> Git diff evidence
+  -> review packet
+  -> CI evidence
+  -> reviewer decisions
+  -> delivery report
+  -> guarded handoff policy
+```
+
+## 2. Phase 10 Goal
+
+Turn mission commands into local, reviewable code patches without bypassing the existing tool-runner, Git-runner, review, CI, delivery, or automation-policy layers:
+
+```txt
+implementation request
+  -> local patch policy
+  -> generated patch artifact
+  -> rendered preview and test evidence
+  -> reviewer and delivery gates
+  -> manual or guarded remote handoff
 ```
 
 ## 3. Operating Rules
@@ -36,76 +49,52 @@ action request
 - Keep merge and production deploy manual-only until a dedicated connector policy, approval model, rollback/canary behavior, and audit trail exist.
 - Allow staging deploy, remote branch push, and draft PR creation to become bounded-auto only after explicit connector policy and required evidence are present.
 - Keep GitHub behavior draft-PR and remote-evidence oriented until merge/release policy exists.
+- Keep implementation writes routed through the tool-runner `file_write` policy until a narrower code-generation policy is defined.
 - Preserve all durable project memory in the AI-Agent Obsidian vault after substantive work.
 
 ## 4. Delivery Slices
 
-### Slice P9.1: Guarded Automation Policy Foundation
+### Slice P10.1: Bounded Implementation Patch Stage
 
-- complete: added shared automation action kinds, modes, evidence requirements, policy snapshot, and evaluator;
-- complete: exposed `GET /api/mission/automation-policy` as a read-only policy endpoint;
-- complete: added deterministic verification that hard-disabled actions never become automatic and that auto-eligible actions require explicit evidence;
-- complete: surfaced automation decisions in Mission Control;
-- complete: wired controller decisions through the automation policy before any future automatic remote or deploy action.
+- complete: added `implementation_patch` to the shared controller stage contract and stop-code contract;
+- complete: controller now writes a bounded generated preview module through `ToolCallService` and `file_write` before local evidence collection;
+- complete: file-write failures stop the controller with `implementation_failed` and linked evidence;
+- complete: Mission Control shows an `Implementation Preview` card backed by the generated module or the latest `Local Code Patch` artifact;
+- complete: live and recovery inspector stage lists include `implementation_patch`;
+- complete: deterministic and rendered verification assert completed file-write evidence and generated UI state.
 
-### Slice P9.2: Mission Control Automation Surface
+### Slice P10.2: Rendered Preview Pipeline
 
-- complete: Mission Control shows the active automation policy matrix in the inspector;
-- complete: Mission Control shows why each tracked action is auto, review-required, manual-only, or disabled;
-- complete: Mission Control exposes missing evidence and hard blockers without mutating state;
-- complete: action buttons remain tied to their existing Git/review/deploy policies.
+- pending: turn generated implementation preview content into a richer rendered preview area for actual mission-requested app surfaces;
+- pending: capture desktop/mobile rendered evidence for the generated surface before delivery;
+- pending: keep preview state recoverable from mission history without replaying the write.
 
-### Slice P9.3: Bounded Auto Handoff Actions
+### Slice P10.3: Targeted Patch Expansion
 
-- complete: controller evaluates auto branch push and draft PR creation only after reviewed delivery, passing CI, current remote evidence, explicit connector policy, and no-secret checks;
-- complete: controller records audit and activity events before and after the handoff policy preflight;
-- complete: controller stores automation decisions on the controller record for recovery and API inspection;
-- complete: controller collects read-only `remote_evidence`, `branch_push_policy`, and `draft_pr_policy` Git evidence after delivery;
-- complete: Mission Control and the read-only recovery inspector show persisted controller handoff decisions, including branch push, draft PR, manual release actions, and hard-disabled actions;
-- keep local commit, merge, production deploy, force push, branch deletion, destructive Git operations, secret serialization, silent fine-tuning, and unbounded loops out of controller auto-execution.
+- pending: define a narrow patch-generation policy for safe repo-local edits beyond the generated preview module;
+- pending: add path allowlists, ownership hints, and file-type limits for implementation patches;
+- pending: keep denied paths, secrets, generated build folders, remote Git, merge, deploy, and destructive operations out of implementation generation.
 
-### Slice P9.4: Bounded Remote Handoff Execution Gate
+### Slice P10.4: Human Approval And Remote Handoff Link
 
-- complete: controller attempts remote branch push and draft PR creation only when the persisted automation decision is `canRunAutomatically`;
-- complete: default controller runs audit `automation_handoff_execution_skipped` and do not create branch push or draft PR operations when evidence or policy is missing;
-- complete: enabled verification fixture proves the controller can call the Git-specific `branch_push` and `draft_pr_create` operations after policy/evidence pass;
-- complete: execution remains Git-runner policy-gated, bounded, audited, and separate from merge/deploy/release actions;
-- keep merge, production deploy, force push, branch deletion, destructive Git operations, secret serialization, silent fine-tuning, and unbounded loops out of controller auto-execution.
+- pending: require review/CI/delivery evidence before any remote handoff action can consume implementation patch output;
+- pending: make draft PR body include patch, preview, CI, review, and delivery evidence when connector policy is enabled;
+- pending: keep automatic merge and production deployment manual-only.
 
-### Slice P9.5: Remote Handoff Execution Evidence UI
+## 5. Phase 9 Completed Baseline
 
-- complete: Mission Control shows a `Remote Handoff Execution` card backed by audit events and Git operations;
-- complete: live and recovered mission views distinguish waiting, skipped, running, completed, blocked, and failed handoff execution states;
-- complete: default delivered and recovered paths visibly show skipped branch push and draft PR execution;
-- complete: rendered QA asserts skipped execution, branch push row, draft PR row, and row count on desktop/mobile delivered and recovery paths;
-- keep the surface read-only. No new mutation button was added.
+Phase 9 is complete. The shipped baseline includes:
 
-### Slice P9.6: Completed Remote Handoff Rendered QA Fixture
+- guarded automation policy contracts, evaluator, and read-only API;
+- Mission Control automation policy matrix and missing-evidence display;
+- controller handoff policy decisions persisted on controller records;
+- read-only remote evidence, branch-push policy evidence, and draft-PR policy evidence;
+- bounded remote handoff execution gate through Git-specific operations when policy/evidence explicitly allow it;
+- Remote Handoff Execution card and compact top-level Handoff signal;
+- default skipped handoff, policy-enabled completed handoff, blocked handoff, and failed handoff rendered QA fixtures;
+- continued hard-disable/manual-only boundaries for merge, production deploy, force push, branch deletion, destructive Git, secret serialization, silent fine-tuning, and unbounded loops.
 
-- complete: rendered QA now includes a separate `auto-handoff` orchestrator stack with a policy-enabled Git runner fixture;
-- complete: the fixture runs the existing controller and GitOperationService path through completed `branch_push` and `draft_pr_create` operations;
-- complete: delivered desktop/mobile UI asserts the Remote Handoff Execution card shows completed branch push and completed draft PR evidence;
-- complete: recovered desktop/mobile UI asserts the archived mission shows the same completed remote handoff evidence without replaying any action;
-- complete: default complete-path QA still asserts skipped remote execution when required policy/evidence is absent;
-- keep merge, production deploy, force push, branch deletion, destructive Git operations, secret serialization, silent fine-tuning, and unbounded loops outside rendered auto fixtures and production auto-execution.
-
-### Slice P9.7: Compact Remote Handoff Signal
-
-- complete: extracted reusable remote handoff execution status helpers for both the inspector card and top War Room signal band;
-- complete: the top `Handoff` signal now reflects actual handoff execution evidence as waiting, skipped, running, completed, blocked, or failed;
-- complete: rendered QA asserts the Handoff signal shows waiting before execution, skipped on the default delivered path, and completed on the policy-enabled auto-handoff fixture;
-- complete: the signal remains read-only and adds no mutation controls.
-
-### Slice P9.8: Blocked/Failed Remote Handoff Rendered QA Fixtures
-
-- complete: rendered QA now includes policy-enabled `blocked-handoff` and `failed-handoff` orchestrator stacks;
-- complete: the blocked fixture proves Mission Control renders a bounded-auto branch push that is policy-blocked by the Git runner layer;
-- complete: the failed fixture proves Mission Control renders a bounded-auto branch push that fails after policy preflight;
-- complete: live delivered and read-only recovered mission views show blocked/failed status, branch push evidence, skipped draft PR evidence, and the top `Handoff` signal state;
-- complete: missing draft PR execution after an interrupted branch push now displays as skipped instead of waiting;
-- keep merge, production deploy, force push, branch deletion, destructive Git operations, secret serialization, silent fine-tuning, and unbounded loops out of rendered fixtures and production auto-execution.
-
-## 5. Phase 8 Completed Slices
+## 6. Phase 8 Completed Slices
 
 ### Slice H1: Mission Intake And Session Source Of Truth
 
@@ -154,7 +143,7 @@ action request
 - complete: kept UI state tied to live runtime, evidence, and Git/review policy rather than introducing static showcase-only content;
 - complete: rendered desktop/mobile QA and Phase 8 verification sweeps passed after the folder organization.
 
-## 6. Still Not Automatic
+## 7. Still Not Automatic
 
 - automatic merge;
 - production release;
@@ -166,7 +155,7 @@ action request
 - silent fine-tuning or model mutation without a visible local policy;
 - unbounded autonomous loops.
 
-## 7. Required Verification
+## 8. Required Verification
 
 - `npm run verify:automation-policy`;
 - `npm run typecheck`;
@@ -182,7 +171,8 @@ action request
 - `npm run build:web`;
 - rendered QA for desktop and mobile mission intake/recovery/delivery flows.
 
-## 8. Next
+## 9. Next
 
-- Decide whether Phase 10 should define connector-specific approval policy for staging deploy, or continue hardening local-first mission execution evidence.
+- Continue Phase 10 with P10.2 rendered preview pipeline and P10.3 targeted patch expansion.
+- Keep implementation writes routed through explicit local policy and visible patch artifacts.
 - Keep merge, production actions, force push, branch deletion, destructive Git reset/checkout, secret serialization, silent fine-tuning, and unbounded autonomous loops out of controller auto-execution.

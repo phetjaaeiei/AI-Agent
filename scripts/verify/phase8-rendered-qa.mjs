@@ -70,6 +70,7 @@ try {
   await completePage.goto(completeUrl, { waitUntil: "domcontentloaded" });
   await completePage.getByRole("region", { name: "Mission intake" }).waitFor({ timeout: 15_000 });
   await assertAutomationPolicyCard(completePage, "desktop intake");
+  await assertImplementationPreviewWaiting(completePage, "desktop intake");
 
   const command = "Build rendered QA inventory dashboard with tests, reviewers, recovery, and delivery evidence.";
   await completePage.getByLabel("Mission intake command").fill(command);
@@ -82,6 +83,7 @@ try {
   await completePage.setViewportSize({ width: 390, height: 844 });
   await completePage.waitForTimeout(150);
   await assertAutomationPolicyCard(completePage, "mobile intake");
+  await assertImplementationPreviewWaiting(completePage, "mobile intake");
   await assertHandoffSignal(completePage, "mobile intake", "waiting", "Remote mutation disabled");
   await assertNoHorizontalOverflow(completePage, "mobile intake");
   await completePage.screenshot({ path: "/tmp/team-ai-agent-h4-intake-mobile.png", fullPage: true });
@@ -94,6 +96,7 @@ try {
   await waitForControllerStatus(completePage, "completed", 15_000);
   await completePage.getByLabel("Autonomous mission controller").waitFor({ timeout: 10_000 });
   await assertControllerHandoffDecisions(completePage, "desktop delivered");
+  await assertImplementationPreviewGenerated(completePage, "desktop delivered");
   await assertSkippedRemoteHandoffExecution(completePage, "desktop delivered");
   await assertHandoffSignal(completePage, "desktop delivered", "skipped", "No eligible bounded-auto handoff");
   await completePage.locator(".mission-history-row").filter({ hasText: "delivered" }).first().waitFor({ timeout: 15_000 });
@@ -103,6 +106,7 @@ try {
   await completePage.setViewportSize({ width: 390, height: 844 });
   await completePage.waitForTimeout(150);
   await assertControllerHandoffDecisions(completePage, "mobile delivered");
+  await assertImplementationPreviewGenerated(completePage, "mobile delivered");
   await assertSkippedRemoteHandoffExecution(completePage, "mobile delivered");
   await assertHandoffSignal(completePage, "mobile delivered", "skipped", "No eligible bounded-auto handoff");
   await assertNoHorizontalOverflow(completePage, "mobile delivered");
@@ -356,14 +360,17 @@ function createFixtureToolRunner(workspaceRoot) {
   return {
     getPolicy: () => policyRunner.getPolicy(),
     evaluate: (request) => policyRunner.evaluate(request),
-    execute: async (request) => ({
-      summary: `${request.command} passed in the Phase 8 rendered QA fixture.`,
-      evidence: [`Command: ${request.command}`, "Fixture exit code: 0"],
-      durationMs: 1,
-      exitCode: 0,
-      stdout: "verification passed",
-      stderr: ""
-    })
+    execute: async (request) => {
+      if (request.kind === "file_write") return policyRunner.execute(request);
+      return {
+        summary: `${request.command} passed in the Phase 8 rendered QA fixture.`,
+        evidence: [`Command: ${request.command}`, "Fixture exit code: 0"],
+        durationMs: 1,
+        exitCode: 0,
+        stdout: "verification passed",
+        stderr: ""
+      };
+    }
   };
 }
 
@@ -668,6 +675,23 @@ async function assertControllerHandoffDecisions(rootLocator, label) {
 
   const rowCount = await summary.locator(".automation-decision-row").count();
   assert(rowCount >= 10, `${label} should render controller handoff decision rows.`);
+}
+
+async function assertImplementationPreviewWaiting(rootLocator, label) {
+  const card = rootLocator.getByLabel("Implementation preview").first();
+  await card.waitFor({ timeout: 10_000 });
+  await card.getByText("waiting", { exact: true }).waitFor({ timeout: 10_000 });
+  await card.getByText("Waiting for implementation patch").waitFor({ timeout: 10_000 });
+  assert(await card.locator(".implementation-preview-sections article").count() >= 2, `${label} should render waiting implementation preview sections.`);
+}
+
+async function assertImplementationPreviewGenerated(rootLocator, label) {
+  const card = rootLocator.getByLabel("Implementation preview").first();
+  await card.waitFor({ timeout: 10_000 });
+  await card.getByText("generated", { exact: true }).waitFor({ timeout: 10_000 });
+  await card.getByText("Local Code Patch").waitFor({ timeout: 10_000 });
+  await card.locator(".implementation-preview-facts strong").filter({ hasText: "apps/web/src/generated/mission-implementation-preview.ts" }).first().waitFor({ timeout: 10_000 });
+  assert(await card.locator(".implementation-preview-sections article").count() >= 2, `${label} should render generated implementation preview sections.`);
 }
 
 async function assertSkippedRemoteHandoffExecution(rootLocator, label) {

@@ -122,6 +122,7 @@ import { CommandOutputSummaryCard } from "./components/mission/CommandOutputSumm
 import type { CommandOutputSummary } from "./components/mission/CommandOutputSummaryCard.js";
 import { EvidenceInspectorCard } from "./components/mission/EvidenceInspectorCard.js";
 import type { EvidenceSourceFilter, EvidenceStatusFilter } from "./components/mission/EvidenceInspectorCard.js";
+import { ImplementationPreviewCard } from "./components/mission/ImplementationPreviewCard.js";
 import { MissionHistoryPanel } from "./components/mission/MissionHistoryPanel.js";
 import { MissionIntakePanel } from "./components/mission/MissionIntakePanel.js";
 import { MissionRecoveryInspector } from "./components/mission/MissionRecoveryInspector.js";
@@ -132,6 +133,7 @@ import { TaskGraphCard } from "./components/mission/TaskGraphCard.js";
 import { TopHud } from "./components/mission/TopHud.js";
 import { HardeningGuidanceList } from "./components/primitives/HardeningGuidanceList.js";
 import type { HardeningGuidance } from "./components/primitives/HardeningGuidanceList.js";
+import { missionImplementationPreview } from "./generated/mission-implementation-preview.js";
 import { isRealArtifactContent, isSeededArtifactContent } from "./utils/artifact-content.js";
 import { missionStateLabel } from "./utils/mission-labels.js";
 import { gitOperationKindLabel, gitOperationSummary, toolCallKindLabel } from "./utils/operation-labels.js";
@@ -1086,6 +1088,7 @@ function createMissionControllerGuidance(controller: MissionControllerRecord): H
     const stageLabel = stop.stage.replaceAll("_", " ");
     const stageAction: Record<typeof stop.code, string> = {
       planning_blocked: "Review the planner artifact and retry after the mission command or assumptions are clearer.",
+      implementation_failed: "Open the Local Code Patch evidence, check file-write policy, then retry after the patch target is safe.",
       tool_failed: "Open Command Output, fix the failing local command, then retry the mission.",
       git_policy: "Check Git policy and workspace state before retry. The controller will not bypass Git read policy.",
       git_not_ready: "Remove denied path changes or add safe changed-file evidence, then build Git evidence again.",
@@ -1110,7 +1113,7 @@ function createMissionControllerGuidance(controller: MissionControllerRecord): H
       id: "controller-delivered",
       tone: "success",
       title: "Delivery evidence is ready",
-      detail: "The local controller finished planning, evidence, CI, reviewers, and delivery.",
+      detail: "The local controller finished planning, implementation patch, evidence, CI, reviewers, and delivery.",
       action: "Use Git policy checks before any branch push or draft PR. Merge and deployment remain human decisions."
     });
   } else if (["blocked", "failed", "cancelled"].includes(controller.status) && controller.attempt < controller.maxAttempts) {
@@ -2920,6 +2923,9 @@ function MissionInspector({
     prioritizedArtifactContents.find((content) => content.artifactId === selectedArtifactId)
       ?? visibleArtifactContents[0]
       ?? prioritizedArtifactContents[0];
+  const implementationPatchContent = prioritizedArtifactContents.find((content) =>
+    content.source === "tool_runner" && content.title === "Local Code Patch"
+  );
   const selectedRoomMeta = departmentMeta[selectedRoomId];
   const currentTask = selectedActiveRole?.task ?? roleDefinition(selectedRole).responsibilities[0] ?? "Coordinate role output";
 
@@ -2955,6 +2961,7 @@ function MissionInspector({
         onCancel={onCancelMissionController}
         onRetry={onRetryMissionController}
       />
+      <ImplementationPreviewCard patchContent={implementationPatchContent} preview={missionImplementationPreview} />
       <RemoteHandoffExecutionCard
         auditEvents={auditEvents}
         gitOperations={gitOperations}
@@ -3200,6 +3207,7 @@ function createAutomationEvidence({
 
 const missionControllerStages: readonly MissionControllerStage[] = [
   "planning",
+  "implementation_patch",
   "tool_evidence",
   "git_evidence",
   "review_packet",
