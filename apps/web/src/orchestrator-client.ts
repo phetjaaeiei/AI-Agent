@@ -14,6 +14,7 @@ import type {
   AgentRunRecord,
   AgentRuntimeInfo,
   AgentRuntimeMode,
+  AutomationPolicySnapshot,
   GitOperationRecord,
   GitOperationRequest,
   GitPolicySnapshot,
@@ -94,6 +95,10 @@ export async function startToolCall(input: ToolCallRequest): Promise<ToolCallRec
 
 export async function fetchGitPolicy(): Promise<GitPolicySnapshot> {
   return validateGitPolicy(await requestJson<unknown>("/api/mission/git-policy"));
+}
+
+export async function fetchAutomationPolicy(): Promise<AutomationPolicySnapshot> {
+  return validateAutomationPolicy(await requestJson<unknown>("/api/mission/automation-policy"));
 }
 
 export async function fetchGitOperations(missionId: string): Promise<GitOperationRecord[]> {
@@ -430,6 +435,21 @@ function validateGitPolicy(value: unknown): GitPolicySnapshot {
     throw new Error("Git policy response is missing required fields.");
   }
   return policy as GitPolicySnapshot;
+}
+
+function validateAutomationPolicy(value: unknown): AutomationPolicySnapshot {
+  if (!value || typeof value !== "object") throw new Error("Automation policy response is invalid.");
+  const policy = value as Partial<AutomationPolicySnapshot>;
+  if (
+    policy.schemaVersion !== 1 ||
+    typeof policy.policyVersion !== "string" ||
+    typeof policy.generatedAt !== "string" ||
+    typeof policy.boundedLoopMaxAttempts !== "number" ||
+    !Array.isArray(policy.actions)
+  ) {
+    throw new Error("Automation policy response is missing required fields.");
+  }
+  return policy as AutomationPolicySnapshot;
 }
 
 function trimTrailingSlash(value: string): string {

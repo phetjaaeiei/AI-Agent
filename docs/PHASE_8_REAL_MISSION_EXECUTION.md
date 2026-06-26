@@ -47,18 +47,22 @@ A user should be able to:
 - Prioritize real artifacts over seeded artifacts in Artifact Memory.
 - Add filters for evidence source and status.
 - Keep Markdown reports readable in dense inspector panels.
+- Auto-capture real local evidence as Ollama learning candidates without mutating the active model until a dedicated training policy exists.
 
 ### H4: End-To-End Mission QA
 
-- Add deterministic tests for full mission progression.
-- Add rendered QA for mission intake, blocked state, recovery, and delivered state.
-- Use Browser plugin first when available; use Playwright fallback when unavailable.
+- `npm run verify:phase8-e2e` now covers a user-entered mission moving through the orchestrator HTTP API, autonomous controller, deterministic planning, bounded tool evidence, real local Git evidence, review packet, default local CI, three reviewer approvals, delivery report, history recovery, and reset retention.
+- The deterministic path uses fixture test-command execution but keeps real tool-runner policy evaluation and real local Git evidence on a temporary repository.
+- The deterministic path asserts that local commit, remote push, and draft PR creation do not occur.
+- `npm run verify:phase8-rendered` now covers rendered mission intake, delivered mission, recovered mission, and blocked mission states at desktop and mobile viewport sizes.
+- Browser-first QA was attempted, but the in-app Browser returned `Browser is not available: iab`; Playwright fallback is the recorded H4 path.
 
 ### H5: Hardening
 
-- Improve user-facing errors for Ollama, GitHub auth, CI, denied paths, and stale remote state.
-- Add retry guidance that avoids duplicate commits, pushes, or PR creation.
-- Update runbooks and Obsidian memory after substantive work.
+- Mission Control now shows inline hardening guidance for Ollama unavailable, GitHub auth unavailable, CI failure, denied path changes, stale remote evidence, blocked remote policy, delivered handoff, and retry boundaries.
+- Retry guidance states that controller, planner, and remote-evidence retries do not repeat commits, pushes, PR creation, merge, or deployment actions.
+- Human handoff steps are documented in [PHASE_8_HARDENING_AND_HANDOFF.md](./PHASE_8_HARDENING_AND_HANDOFF.md).
+- Final H5 verification passed.
 
 ## Safety Boundaries
 
@@ -69,9 +73,10 @@ A user should be able to:
 - No destructive Git reset/checkout.
 - No secret serialization.
 - No arbitrary shell outside the tool-runner policy.
+- No silent Ollama fine-tuning, model replacement, or adapter creation without an explicit local training policy.
 
 ## Current Handoff
 
 - Phase 7 draft PR: `https://github.com/phetjaaeiei/AI-Agent/pull/1`
 - Current branch: `codex/phase-7-remote-mutation-policy`
-- Current implementation target: start H3 Real Evidence Inspector.
+- Current implementation target: Phase 8 is complete through H5 hardening.

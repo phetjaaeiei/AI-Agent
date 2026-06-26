@@ -12,16 +12,18 @@ planning
   -> local_ci
   -> reviewers
   -> delivery
+  -> handoff_policy
   -> completed or stopped
 ```
 
 The controller calls existing agent, tool, Git, review, CI, and artifact services. It does not bypass their policy checks.
+The final handoff policy stage evaluates guarded automation decisions for remote handoff and deployment readiness without executing push, PR creation, merge, deploy, force-push, branch deletion, destructive Git, secret serialization, fine-tuning, or unbounded loop actions.
 
 ## Lifecycle
 
 - `queued`: persisted and waiting for execution.
 - `running`: executing one bounded stage.
-- `completed`: every local stage passed and a delivery report exists.
+- `completed`: every local stage passed, a delivery report exists, and handoff automation policy was evaluated.
 - `blocked`: a policy, evidence, CI, or reviewer gate stopped the mission.
 - `failed`: an unexpected internal error stopped execution.
 - `cancelled`: the user requested cancellation.
@@ -51,4 +53,4 @@ The default orchestrator recovers interrupted controllers at startup. Mission re
 
 ## Safety Boundary
 
-The controller remains local by default. It does not push branches, create remote pull requests, merge, deploy, read secret paths, or run destructive Git reset/checkout commands.
+The controller remains local by default. It does not push branches, create remote pull requests, merge, deploy, read secret paths, or run destructive Git reset/checkout commands. The handoff policy stage records eligibility and blockers only.

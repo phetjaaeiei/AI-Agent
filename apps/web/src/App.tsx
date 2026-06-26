@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  Activity,
   AlertTriangle,
   Archive,
-  Bot,
-  Boxes,
   Building2,
   CheckCircle2,
   ChevronRight,
@@ -17,20 +14,16 @@ import {
   FileText,
   GitBranch,
   LayoutDashboard,
-  Play,
   RotateCcw,
   Search,
   ShieldCheck,
-  Sparkles,
   Square,
   TestTube2,
   Upload,
-  UsersRound,
   X,
   Zap
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { ROLE_REGISTRY } from "../../../packages/agent-core/src/roles/role-registry.js";
 import { AGENT_MODEL_ROUTING } from "../../../packages/config/src/index.js";
 import {
   MISSION_BENCHMARKS,
@@ -58,7 +51,6 @@ import type {
   RuntimeAuditEvent,
   MissionHistoryRecord,
   MissionHistorySummary,
-  RuntimeMissionLifecycleStatus,
   RuntimeMissionState,
   RuntimeSessionSnapshot
 } from "../../../packages/workflow/src/index.js";
@@ -67,6 +59,8 @@ import type {
   AgentRunRecord,
   AgentRuntimeInfo,
   AssumptionRecord,
+  AutomationEvidenceContext,
+  AutomationPolicySnapshot,
   ArtifactStatus,
   ArtifactType,
   DepartmentId,
@@ -83,6 +77,7 @@ import type {
   ToolCallRequest,
   ToolPolicySnapshot
 } from "../../../packages/shared/src/index.js";
+import { createDefaultAutomationPolicySnapshot } from "../../../packages/shared/src/index.js";
 import {
   cancelAgentRun,
   cancelMissionController,
@@ -91,6 +86,7 @@ import {
   fetchAgentRun,
   fetchAgentRuns,
   fetchAgentRuntimeInfo,
+  fetchAutomationPolicy,
   fetchGitOperations,
   fetchGitPolicy,
   fetchMissionController,
@@ -114,6 +110,39 @@ import {
   subscribeToAgentRun
 } from "./orchestrator-client.js";
 import type { OrchestratorConnectionStatus } from "./orchestrator-client.js";
+import { WarRoomSignalPanel } from "./components/concept/WarRoomSignalPanel.js";
+import type { WarRoomSignal } from "./components/concept/WarRoomSignalPanel.js";
+import { LeftNav } from "./components/layout/LeftNav.js";
+import { AutomationDecisionSummary } from "./components/mission/AutomationDecisionSummary.js";
+import { AutomationPolicyCard } from "./components/mission/AutomationPolicyCard.js";
+import { BottomDock } from "./components/mission/BottomDock.js";
+import type { ActivityEvent, ActivityFilter } from "./components/mission/BottomDock.js";
+import { ArtifactMemoryCard } from "./components/mission/ArtifactMemoryCard.js";
+import { CommandOutputSummaryCard } from "./components/mission/CommandOutputSummaryCard.js";
+import type { CommandOutputSummary } from "./components/mission/CommandOutputSummaryCard.js";
+import { EvidenceInspectorCard } from "./components/mission/EvidenceInspectorCard.js";
+import type { EvidenceSourceFilter, EvidenceStatusFilter } from "./components/mission/EvidenceInspectorCard.js";
+import { MissionHistoryPanel } from "./components/mission/MissionHistoryPanel.js";
+import { MissionIntakePanel } from "./components/mission/MissionIntakePanel.js";
+import { MissionRecoveryInspector } from "./components/mission/MissionRecoveryInspector.js";
+import { OllamaLearningCard } from "./components/mission/OllamaLearningCard.js";
+import { RemoteHandoffExecutionCard } from "./components/mission/RemoteHandoffExecutionCard.js";
+import type { OllamaLearningCandidate } from "./components/mission/OllamaLearningCard.js";
+import { TaskGraphCard } from "./components/mission/TaskGraphCard.js";
+import { TopHud } from "./components/mission/TopHud.js";
+import { HardeningGuidanceList } from "./components/primitives/HardeningGuidanceList.js";
+import type { HardeningGuidance } from "./components/primitives/HardeningGuidanceList.js";
+import { isRealArtifactContent, isSeededArtifactContent } from "./utils/artifact-content.js";
+import { missionStateLabel } from "./utils/mission-labels.js";
+import { gitOperationKindLabel, gitOperationSummary, toolCallKindLabel } from "./utils/operation-labels.js";
+import { createRemoteHandoffSignalSummary } from "./utils/remote-handoff.js";
+import {
+  findRoleByDepartment,
+  getRoleDefinition as roleDefinition,
+  getRoleName as roleName,
+  getShortRoleName as shortRoleName
+} from "./utils/role-labels.js";
+import { formatHistoryTimestamp, formatSavedAt } from "./utils/time-format.js";
 
 type ActiveRole = {
   roleId: RoleId;
@@ -127,18 +156,6 @@ type ActiveRole = {
   walkDuration: number;
   walkDelay: number;
 };
-
-type ActivityEvent = {
-  id: string;
-  roleId: RoleId;
-  type: "artifact" | "gate" | "tool" | "risk" | "phase";
-  title: string;
-  summary: string;
-  tone: "info" | "success" | "warning" | "danger";
-  time: string;
-};
-
-type ActivityFilter = "all" | ActivityEvent["type"];
 
 type GateStatus = "passed" | "reviewing" | "running" | "queued" | "blocked";
 
@@ -244,12 +261,6 @@ const accuracy = calculateAccuracyScore({
   verifiability: 86,
   riskControl: 88
 });
-
-const roleDefinition = (roleId: RoleId) => ROLE_REGISTRY.find((role) => role.id === roleId) ?? ROLE_REGISTRY[0]!;
-
-const roleName = (roleId: RoleId) => roleDefinition(roleId).name;
-
-const shortRoleName = (roleId: RoleId) => roleName(roleId).replace(" Agent", "");
 
 const activeRoles: ActiveRole[] = [
   { roleId: "ceo", task: "Confirm success criteria", status: "planning", room: "executive", x: 17, y: 18, walkX: 24, walkY: 8, walkDuration: 9.4, walkDelay: -1.2 },
@@ -612,14 +623,6 @@ const artifactStatusLabel: Record<ArtifactStatus, string> = {
   superseded: "Superseded"
 };
 
-const taskStatusLabel: Record<TaskRunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  reviewing: "Reviewing",
-  passed: "Passed",
-  blocked: "Blocked"
-};
-
 const initialGateRuns: Record<QualityGateId, GateRun> = {
   planning_gate: {
     gateId: "planning_gate",
@@ -671,31 +674,8 @@ const initialGateRuns: Record<QualityGateId, GateRun> = {
   }
 };
 
-const activityFilterOptions: { id: ActivityFilter; label: string; icon: LucideIcon }[] = [
-  { id: "all", label: "All", icon: Activity },
-  { id: "gate", label: "Gates", icon: ShieldCheck },
-  { id: "artifact", label: "Artifacts", icon: FileText },
-  { id: "tool", label: "Tools", icon: Command },
-  { id: "risk", label: "Risks", icon: AlertTriangle }
-];
-
 const MISSION_SESSION_STORAGE_KEY = "team-ai-agent:mission-session:v1";
 const INITIAL_SESSION_SAVED_AT = "2026-06-18T10:42:00.000Z";
-const orchestratorStatusLabel: Record<OrchestratorConnectionStatus, string> = {
-  checking: "Checking server",
-  connected: "Server connected",
-  syncing: "Syncing server",
-  local: "Local fallback"
-};
-
-const missionStateLabel: Record<RuntimeMissionLifecycleStatus, string> = {
-  draft: "Draft",
-  saved: "Saved",
-  running: "Running",
-  blocked: "Blocked",
-  delivered: "Delivered"
-};
-
 const agentRunStatusLabel: Record<AgentRunRecord["status"], string> = {
   queued: "Queued",
   running: "Planning",
@@ -716,33 +696,12 @@ const toolCallStatusLabel: Record<ToolCallRecord["status"], string> = {
   cancelled: "Cancelled"
 };
 
-const toolCallKindLabel: Record<ToolCallRecord["kind"], string> = {
-  file_read: "File read",
-  file_write: "File write",
-  shell_command: "Shell",
-  test_command: "Test"
-};
-
 const gitOperationStatusLabel: Record<GitOperationRecord["status"], string> = {
   queued: "Queued",
   running: "Running",
   completed: "Completed",
   failed: "Failed",
   blocked: "Blocked"
-};
-
-const gitOperationKindLabel: Record<GitOperationRecord["kind"], string> = {
-  status: "Status",
-  diff: "Diff",
-  commit_plan: "Commit plan",
-  local_commit: "Local commit",
-  pr_draft: "PR draft",
-  remote_health: "Remote health",
-  remote_evidence: "Remote evidence",
-  branch_push_policy: "Push policy",
-  draft_pr_policy: "PR policy",
-  branch_push: "Branch push",
-  draft_pr_create: "Draft PR create"
 };
 
 const initialAgentRuntimeInfo: AgentRuntimeInfo = {
@@ -784,6 +743,8 @@ const initialGitPolicy: GitPolicySnapshot = {
   maxDiffBytes: 0,
   deniedPathPatterns: []
 };
+
+const initialAutomationPolicy = createDefaultAutomationPolicySnapshot();
 
 function createInitialArtifactRecords(createdAt: string): RuntimeArtifactRecord[] {
   return artifactEvidence.map((artifact, index) => {
@@ -896,16 +857,6 @@ function saveRuntimeSession(snapshot: RuntimeSessionSnapshot) {
   window.localStorage.setItem(MISSION_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
 }
 
-function formatSavedAt(savedAt: string): string {
-  const date = new Date(savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return "not saved";
-  }
-
-  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-}
-
 function formatOrchestratorError(error: unknown): string {
   return error instanceof Error ? error.message : "Orchestrator is not reachable.";
 }
@@ -915,41 +866,394 @@ function formatWorkspaceLabel(workspaceRoot: string): string {
   return parts.length >= 2 ? parts.slice(-2).join("/") : workspaceRoot;
 }
 
-function artifactSourceLabel(source: RuntimeArtifactContent["source"]): string {
-  if (source === "orchestrator") return "Server";
-  if (source === "agent_runtime") return "Agent";
-  if (source === "tool_runner") return "Tool";
-  if (source === "git_runner") return "Git";
-  if (source === "review_service") return "Review";
-  return "Local";
+const artifactSourcePriority: Record<RuntimeArtifactContent["source"], number> = {
+  review_service: 90,
+  git_runner: 80,
+  tool_runner: 70,
+  agent_runtime: 60,
+  orchestrator: 50,
+  local_runtime: 40
+};
+
+const artifactStatusPriority: Record<RuntimeArtifactContent["status"], number> = {
+  verified: 30,
+  reviewing: 20,
+  draft: 10
+};
+
+function compareArtifactContent(a: RuntimeArtifactContent, b: RuntimeArtifactContent): number {
+  const seededDelta = Number(isSeededArtifactContent(a)) - Number(isSeededArtifactContent(b));
+  if (seededDelta !== 0) return seededDelta;
+
+  const sourceDelta = artifactSourcePriority[b.source] - artifactSourcePriority[a.source];
+  if (sourceDelta !== 0) return sourceDelta;
+
+  const statusDelta = artifactStatusPriority[b.status] - artifactStatusPriority[a.status];
+  if (statusDelta !== 0) return statusDelta;
+
+  const timeDelta = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  if (Number.isFinite(timeDelta) && timeDelta !== 0) return timeDelta;
+
+  return b.version - a.version;
 }
 
-function gitOperationSummary(operation: GitOperationRecord): string {
-  if (operation.errorSummary) return operation.errorSummary;
-  if (operation.result?.draftPullRequest) return operation.result.draftPullRequest.url;
-  if (operation.result?.branchPush) return `${operation.result.branchPush.branchName} pushed`;
-  if (operation.result?.remoteEvidence) {
-    const evidence = operation.result.remoteEvidence;
-    return `${evidence.publicationState.replaceAll("_", " ")}; ${evidence.pullRequest.state === "none" ? "no PR" : evidence.pullRequest.state}`;
+function filterArtifactContent(
+  contents: readonly RuntimeArtifactContent[],
+  sourceFilter: EvidenceSourceFilter,
+  statusFilter: EvidenceStatusFilter
+): RuntimeArtifactContent[] {
+  return contents.filter((content) => {
+    const sourceMatches =
+      sourceFilter === "all"
+        || sourceFilter === "real" && isRealArtifactContent(content)
+        || sourceFilter === content.source;
+    const statusMatches = statusFilter === "all" || statusFilter === content.status;
+
+    return sourceMatches && statusMatches;
+  });
+}
+
+function createOllamaLearningCandidates(contents: readonly RuntimeArtifactContent[]): OllamaLearningCandidate[] {
+  return contents
+    .filter(isRealArtifactContent)
+    .slice(0, 6)
+    .map((content) => ({
+      id: content.id,
+      title: content.title,
+      source: content.source,
+      status: content.status,
+      readiness: content.status === "verified" ? "ready" : content.status === "reviewing" ? "needs_review" : "queued",
+      summary: content.summary
+    }));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function redactEvidenceText(
+  value: string,
+  policy: Pick<ToolPolicySnapshot, "workspaceRoot" | "deniedPathPatterns"> | Pick<GitPolicySnapshot, "workspaceRoot" | "deniedPathPatterns">
+): { text: string; redactionCount: number } {
+  let text = value;
+  let redactionCount = 0;
+
+  const replaceAllMatches = (pattern: RegExp, replacement: string | ((match: string, ...groups: string[]) => string)) => {
+    text = text.replace(pattern, (...args: string[]) => {
+      redactionCount += 1;
+      if (typeof replacement === "function") {
+        const [match = "", ...groups] = args;
+        return replacement(match, ...groups);
+      }
+      return replacement;
+    });
+  };
+
+  if (policy.workspaceRoot) {
+    replaceAllMatches(new RegExp(escapeRegExp(policy.workspaceRoot), "g"), "[workspace]");
   }
-  if (operation.result?.remoteMutationPolicy) {
-    const policy = operation.result.remoteMutationPolicy;
-    return policy.allowed ? `${policy.branchName} ready` : `${policy.blockers.length} blockers`;
+
+  for (const deniedPath of policy.deniedPathPatterns) {
+    if (!deniedPath.trim()) continue;
+    replaceAllMatches(new RegExp(escapeRegExp(deniedPath), "gi"), "[denied path]");
   }
-  if (operation.result?.remoteHealth) {
-    const health = operation.result.remoteHealth;
-    return health.access === "ok" ? `${health.repository} reachable` : health.access.replaceAll("_", " ");
+
+  replaceAllMatches(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]");
+  replaceAllMatches(/\b(?:sk|sk-proj)-[A-Za-z0-9_-]{8,}/g, "[redacted-api-key]");
+  replaceAllMatches(
+    /\b((?:api[_-]?key|token|secret|password|passwd|private[_-]?key|authorization|auth[_-]?token)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s"'`]+)/gi,
+    (_match, prefix) => `${prefix}[redacted]`
+  );
+
+  return { text, redactionCount };
+}
+
+function compactEvidenceText(value: string): string {
+  return value
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 900);
+}
+
+function createToolCommandSummary(call: ToolCallRecord, policy: ToolPolicySnapshot): CommandOutputSummary {
+  const rawPreview = compactEvidenceText([
+    call.result?.stdout,
+    call.result?.stderr,
+    call.result?.patch,
+    call.result?.evidence.join("\n")
+  ].filter(Boolean).join("\n"));
+  const rawSummary = call.result?.summary ?? call.errorSummary ?? call.policy.reason;
+  const rawTarget = call.targetPath ?? call.command ?? toolCallKindLabel[call.kind];
+  const redactedSummary = redactEvidenceText(rawSummary, policy);
+  const redactedPreview = redactEvidenceText(rawPreview || "No command output captured for this record.", policy);
+  const redactedTarget = redactEvidenceText(rawTarget, policy);
+
+  return {
+    id: call.id,
+    source: "tool",
+    label: toolCallKindLabel[call.kind],
+    status: call.status,
+    target: redactedTarget.text,
+    summary: redactedSummary.text,
+    preview: redactedPreview.text,
+    redactionCount: redactedSummary.redactionCount + redactedPreview.redactionCount + redactedTarget.redactionCount,
+    updatedAt: call.updatedAt
+  };
+}
+
+function createGitCommandSummary(operation: GitOperationRecord, policy: GitPolicySnapshot): CommandOutputSummary {
+  const changedFiles = operation.result?.diff?.files
+    .slice(0, 5)
+    .map((file) => `${file.path} (+${file.insertions}/-${file.deletions})`)
+    .join("\n");
+  const rawPreview = compactEvidenceText([
+    operation.result?.summary,
+    operation.result?.evidence.join("\n"),
+    changedFiles
+  ].filter(Boolean).join("\n"));
+  const rawSummary = operation.result?.summary ?? operation.errorSummary ?? operation.policy.reason;
+  const rawTarget = operation.cwd ?? operation.result?.remoteEvidence?.branchName ?? operation.result?.remoteHealth?.repository ?? gitOperationKindLabel[operation.kind];
+  const redactedSummary = redactEvidenceText(rawSummary, policy);
+  const redactedPreview = redactEvidenceText(rawPreview || "No Git command output captured for this record.", policy);
+  const redactedTarget = redactEvidenceText(rawTarget, policy);
+
+  return {
+    id: operation.id,
+    source: "git",
+    label: gitOperationKindLabel[operation.kind],
+    status: operation.status,
+    target: redactedTarget.text,
+    summary: redactedSummary.text,
+    preview: redactedPreview.text,
+    redactionCount: redactedSummary.redactionCount + redactedPreview.redactionCount + redactedTarget.redactionCount,
+    updatedAt: operation.updatedAt
+  };
+}
+
+function createCommandOutputSummaries(
+  toolCalls: readonly ToolCallRecord[],
+  gitOperations: readonly GitOperationRecord[],
+  toolPolicy: ToolPolicySnapshot,
+  gitPolicy: GitPolicySnapshot
+): CommandOutputSummary[] {
+  return [
+    ...toolCalls.map((call) => createToolCommandSummary(call, toolPolicy)),
+    ...gitOperations.map((operation) => createGitCommandSummary(operation, gitPolicy))
+  ]
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 6);
+}
+
+function createAgentRuntimeGuidance(runtimeInfo: AgentRuntimeInfo, run?: AgentRunRecord): HardeningGuidance[] {
+  const guidance: HardeningGuidance[] = [];
+
+  if (runtimeInfo.activeProvider !== "ollama") {
+    const detail = !runtimeInfo.ollamaAvailable
+      ? `Ollama is not reachable at ${runtimeInfo.ollamaBaseUrl}.`
+      : !runtimeInfo.modelAvailable
+        ? `${runtimeInfo.model} is not available in the local Ollama library.`
+        : runtimeInfo.message;
+    guidance.push({
+      id: "ollama-unavailable",
+      tone: "warning",
+      title: "Ollama unavailable",
+      detail,
+      action: `Start Ollama and pull ${runtimeInfo.model}, or keep deterministic fallback for verification.`
+    });
   }
-  if (operation.result?.commitPlan) {
-    return operation.result.commitPlan.ready
-      ? `${operation.result.commitPlan.changedFiles.length} files ready`
-      : "Plan blocked";
+
+  if (run && run.status !== "completed" && isTerminalAgentRun(run.status)) {
+    guidance.push({
+      id: "agent-retry",
+      tone: run.status === "cancelled" ? "info" : "warning",
+      title: "Planner retry is local",
+      detail: run.errorSummary ?? `Run ended as ${run.status}.`,
+      action: "Retry run repeats planner and verifier work only. It does not run tools, commit code, push branches, or create pull requests."
+    });
   }
-  if (operation.result?.prDraft) return operation.result.prDraft.status.replaceAll("_", " ");
-  if (operation.result?.worktree) {
-    return operation.result.worktree.isClean ? `${operation.result.worktree.branch} clean` : `${operation.result.worktree.files.length} changed files`;
+
+  return guidance.slice(0, 3);
+}
+
+function createMissionControllerGuidance(controller: MissionControllerRecord): HardeningGuidance[] {
+  const guidance: HardeningGuidance[] = [];
+  const stop = controller.stopReason;
+
+  if (stop) {
+    const stageLabel = stop.stage.replaceAll("_", " ");
+    const stageAction: Record<typeof stop.code, string> = {
+      planning_blocked: "Review the planner artifact and retry after the mission command or assumptions are clearer.",
+      tool_failed: "Open Command Output, fix the failing local command, then retry the mission.",
+      git_policy: "Check Git policy and workspace state before retry. The controller will not bypass Git read policy.",
+      git_not_ready: "Remove denied path changes or add safe changed-file evidence, then build Git evidence again.",
+      ci_failed: "Open Review Packet CI, fix the failing command, rerun local CI, then retry the mission.",
+      review_revise: "Inspect reviewer notes, refresh the packet after changes, then retry within the bounded loop.",
+      review_blocked: "Resolve reviewer blockers before retry. Delivery stays disabled until required reviewers pass.",
+      delivery_not_ready: "Refresh the review packet and rebuild delivery after all requirements pass.",
+      cancelled: "Resume with Retry mission when the same local evidence should be collected again.",
+      unexpected: "Inspect the latest tool, Git, and review evidence before retrying the controller."
+    };
+    guidance.push({
+      id: `controller-${stop.code}`,
+      tone: stop.code === "unexpected" ? "danger" : "warning",
+      title: `${stageLabel} needs attention`,
+      detail: stop.message,
+      action: stageAction[stop.code]
+    });
   }
-  return operation.result?.summary ?? operation.policy.reason;
+
+  if (controller.status === "completed") {
+    guidance.push({
+      id: "controller-delivered",
+      tone: "success",
+      title: "Delivery evidence is ready",
+      detail: "The local controller finished planning, evidence, CI, reviewers, and delivery.",
+      action: "Use Git policy checks before any branch push or draft PR. Merge and deployment remain human decisions."
+    });
+  } else if (["blocked", "failed", "cancelled"].includes(controller.status) && controller.attempt < controller.maxAttempts) {
+    guidance.push({
+      id: "controller-retry-boundary",
+      tone: "info",
+      title: "Retry boundary",
+      detail: `Attempt ${controller.attempt}/${controller.maxAttempts} is terminal and archived before retry.`,
+      action: "Retry mission repeats bounded local controller stages. It does not repeat commits, pushes, PR creation, merge, or deploy actions."
+    });
+  }
+
+  return guidance.slice(0, 3);
+}
+
+function createGitHardeningGuidance(policy: GitPolicySnapshot, operations: readonly GitOperationRecord[]): HardeningGuidance[] {
+  const guidance: HardeningGuidance[] = [];
+  const latestWorktree = operations.find((operation) => operation.result?.worktree)?.result?.worktree;
+  const latestRemoteHealth = operations.find((operation) => operation.result?.remoteHealth)?.result?.remoteHealth;
+  const latestRemoteEvidence = operations.find((operation) => operation.result?.remoteEvidence)?.result?.remoteEvidence;
+  const latestRemotePolicy = operations.find((operation) => operation.result?.remoteMutationPolicy)?.result?.remoteMutationPolicy;
+  const blockedMutation = operations.find((operation) => ["branch_push", "draft_pr_create", "local_commit"].includes(operation.kind) && operation.status === "blocked");
+
+  if (latestWorktree?.hasDeniedChanges) {
+    guidance.push({
+      id: "git-denied-paths",
+      tone: "danger",
+      title: "Denied path changes",
+      detail: "The worktree contains changes in a denied path such as secrets, Git metadata, build output, or private key material.",
+      action: "Remove or move denied-path changes before commit planning. The app will not read, diff, commit, push, or serialize those paths."
+    });
+  }
+
+  if (!policy.allowGitRead) {
+    guidance.push({
+      id: "git-read-disabled",
+      tone: "warning",
+      title: "Git read disabled",
+      detail: "Git evidence cannot run while read access is disabled by policy.",
+      action: "Enable the Git read policy for this local workspace before retrying controller Git evidence."
+    });
+  }
+
+  if (latestRemoteHealth && latestRemoteHealth.access !== "ok") {
+    const authDetail = latestRemoteHealth.access === "auth_required" || latestRemoteHealth.githubAuthenticated === false
+      ? "GitHub authentication is not available for the current remote check."
+      : latestRemoteHealth.summary;
+    guidance.push({
+      id: "github-auth-unavailable",
+      tone: "warning",
+      title: latestRemoteHealth.access === "auth_required" ? "GitHub auth unavailable" : "Remote unavailable",
+      detail: authDetail,
+      action: "Authenticate with GitHub outside this app, then run Check remote again. Push and PR creation still require explicit policy."
+    });
+  }
+
+  if (latestRemoteEvidence?.publicationState === "published_stale" || latestRemoteEvidence?.retryable) {
+    guidance.push({
+      id: "remote-stale",
+      tone: "warning",
+      title: "Remote evidence is stale",
+      detail: latestRemoteEvidence.retryReason ?? latestRemoteEvidence.summary,
+      action: "Recheck remote evidence after the branch or draft PR is updated. Do not repeat push or PR creation until policy checks pass again."
+    });
+  }
+
+  if (latestRemotePolicy && !latestRemotePolicy.allowed) {
+    guidance.push({
+      id: "remote-policy-blocked",
+      tone: "info",
+      title: "Remote mutation blocked",
+      detail: latestRemotePolicy.blockers.slice(0, 2).join(" ") || latestRemotePolicy.reason,
+      action: "Run policy checks with an explicit delivered review packet before branch push or draft PR creation."
+    });
+  }
+
+  if (blockedMutation) {
+    guidance.push({
+      id: `blocked-${blockedMutation.kind}`,
+      tone: "warning",
+      title: `${gitOperationKindLabel[blockedMutation.kind]} blocked`,
+      detail: blockedMutation.errorSummary ?? blockedMutation.policy.reason,
+      action: "This blocked operation is recorded as evidence only. It did not mutate the repository or remote."
+    });
+  }
+
+  return uniqueGuidance(guidance).slice(0, 4);
+}
+
+function createReviewHardeningGuidance(packet: ReviewPacket): HardeningGuidance[] {
+  const guidance: HardeningGuidance[] = [];
+  const failedCiCommands = packet.ciRun?.commands.filter((command) => command.status !== "passed") ?? [];
+  const deniedRequirement = packet.requirements.find((requirement) => requirement.status === "block" && /denied/i.test(requirement.summary));
+  const blockedRequirement = packet.requirements.find((requirement) => requirement.status === "block");
+
+  if (failedCiCommands.length > 0) {
+    guidance.push({
+      id: "ci-failure",
+      tone: "danger",
+      title: "Local CI failed",
+      detail: failedCiCommands.slice(0, 2).map((command) => `${command.command}: ${command.summary}`).join(" "),
+      action: "Fix the failing command evidence, rerun local CI, refresh the packet, then rebuild delivery."
+    });
+  }
+
+  if (deniedRequirement) {
+    guidance.push({
+      id: "review-denied-paths",
+      tone: "danger",
+      title: "Denied path blocks review",
+      detail: deniedRequirement.summary,
+      action: "Remove denied-path changes before review. Delivery cannot become ready while denied paths are present."
+    });
+  } else if (blockedRequirement) {
+    guidance.push({
+      id: `review-${blockedRequirement.id}`,
+      tone: "warning",
+      title: `${blockedRequirement.label} blocked`,
+      detail: blockedRequirement.summary,
+      action: "Resolve the blocked evidence item, then refresh evidence before reviewer approval."
+    });
+  }
+
+  if (packet.status === "delivered") {
+    guidance.push({
+      id: "human-handoff",
+      tone: "success",
+      title: "Human handoff ready",
+      detail: "The delivery report was generated from local evidence.",
+      action: "Use remote policy checks for draft PR handoff. Merge, release, and deployment remain manual."
+    });
+  }
+
+  return uniqueGuidance(guidance).slice(0, 3);
+}
+
+function uniqueGuidance(guidance: readonly HardeningGuidance[]): HardeningGuidance[] {
+  const seen = new Set<string>();
+  return guidance.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
 }
 
 function createArtifactContentsFromSession(snapshot: RuntimeSessionSnapshot): RuntimeArtifactContent[] {
@@ -1098,6 +1402,7 @@ export function App() {
   const [gitPolicy, setGitPolicy] = useState<GitPolicySnapshot>(initialGitPolicy);
   const [gitOperations, setGitOperations] = useState<GitOperationRecord[]>([]);
   const [isGitRunning, setIsGitRunning] = useState(false);
+  const [automationPolicy, setAutomationPolicy] = useState<AutomationPolicySnapshot>(initialAutomationPolicy);
   const [reviewPackets, setReviewPackets] = useState<ReviewPacket[]>([]);
   const [isReviewRunning, setIsReviewRunning] = useState(false);
   const [missionControllers, setMissionControllers] = useState<MissionControllerRecord[]>([]);
@@ -1114,6 +1419,59 @@ export function App() {
   const activeTask = missionTasks[activeRouteIndex] ?? missionTasks[0]!;
   const activeMissionController = missionControllers[0];
   const missionTitle = missionState.title || missionPlan.title;
+  const latestReviewPacket = reviewPackets[0];
+  const realEvidenceCount = artifactContents.filter(isRealArtifactContent).length;
+  const controllerSignalStatus = activeMissionController?.status ?? missionState.status;
+  const remoteMutationEnabled = gitPolicy.allowRemotePush || gitPolicy.allowPullRequestCreate;
+  const handoffSignal = createRemoteHandoffSignalSummary({
+    auditEvents,
+    gitOperations,
+    remoteMutationEnabled
+  });
+  const controllerSignalTone: WarRoomSignal["tone"] =
+    activeMissionController?.status === "blocked" || activeMissionController?.status === "failed"
+      ? "red"
+      : activeMissionController?.status === "completed" || missionState.status === "delivered"
+        ? "green"
+        : isAutopilotRunning
+          ? "blue"
+          : "amber";
+  const warRoomSignals: WarRoomSignal[] = [
+    {
+      id: "runtime",
+      icon: "cpu",
+      label: "Runtime",
+      value: agentRuntimeInfo.activeProvider === "ollama" ? "Ollama" : "Fallback",
+      detail: agentRuntimeInfo.activeProvider === "ollama" ? agentRuntimeInfo.model : "Deterministic fallback visible",
+      tone: agentRuntimeInfo.activeProvider === "ollama" ? "green" : "amber"
+    },
+    {
+      id: "controller",
+      icon: "activity",
+      label: "Controller",
+      value: controllerSignalStatus.replaceAll("_", " "),
+      detail: activeMissionController
+        ? `Stage ${activeMissionController.currentStage.replaceAll("_", " ")}`
+        : missionState.statusReason,
+      tone: controllerSignalTone
+    },
+    {
+      id: "evidence",
+      icon: "shield",
+      label: "Evidence",
+      value: `${realEvidenceCount} real`,
+      detail: `${artifactContents.length} artifact memories tracked`,
+      tone: realEvidenceCount > 0 ? "green" : "amber"
+    },
+    {
+      id: "handoff",
+      icon: "git",
+      label: "Handoff",
+      value: handoffSignal.value,
+      detail: handoffSignal.detail,
+      tone: handoffSignal.tone
+    }
+  ];
 
   const filteredActivity = useMemo(
     () => activityLog.filter((event) => activityFilter === "all" || event.type === activityFilter),
@@ -1193,12 +1551,13 @@ export function App() {
       fetchToolPolicy(),
       fetchToolCalls(initialSession.missionId),
       fetchGitPolicy(),
+      fetchAutomationPolicy(),
       fetchGitOperations(initialSession.missionId),
       fetchReviewPackets(initialSession.missionId),
       fetchMissionControllers(initialSession.missionId),
       fetchMissionHistory()
     ])
-      .then(([snapshot, contents, runtimeInfo, runs, policy, calls, gitPolicy, gitOperations, reviewPackets, controllers, history]) => {
+      .then(([snapshot, contents, runtimeInfo, runs, policy, calls, gitPolicy, automationPolicy, gitOperations, reviewPackets, controllers, history]) => {
         if (cancelled) {
           return;
         }
@@ -1210,6 +1569,7 @@ export function App() {
         setToolPolicy(policy);
         setToolCalls(calls);
         setGitPolicy(gitPolicy);
+        setAutomationPolicy(automationPolicy);
         setGitOperations(gitOperations);
         setReviewPackets(reviewPackets);
         setMissionControllers(controllers);
@@ -1507,7 +1867,7 @@ export function App() {
 
   function selectRoom(department: DepartmentId) {
     const roomAgent = activeRoles.find((role) => role.room === department);
-    const fallbackRole = ROLE_REGISTRY.find((role) => role.department === department);
+    const fallbackRole = findRoleByDepartment(department);
 
     setSelectedRoomId(department);
 
@@ -1990,19 +2350,25 @@ export function App() {
       <main className="workspace">
         <TopHud missionPlan={missionPlan} missionTitle={missionTitle} />
         <MissionIntakePanel
+          assumptionCount={missionAssumptions.length}
           assumptionDraft={assumptionDraft}
           commandDraft={commandDraft}
           isAutopilotRunning={isAutopilotRunning}
           isSaving={isMissionSaving}
           lastSavedAt={lastSavedAt}
           lastSavedCommandDraft={lastSavedCommandDraft}
-          missionAssumptions={missionAssumptions}
           missionPlan={missionPlan}
           missionState={missionState}
           onAssumptionChange={updateAssumptionDraft}
           onCommandChange={updateCommandDraft}
           onResetDraft={resetMissionDraft}
           onSaveMission={saveMissionIntake}
+          savedAssumptionDraft={formatAssumptionDraft(missionAssumptions)}
+        />
+        <WarRoomSignalPanel
+          headline={missionTitle}
+          signals={warRoomSignals}
+          subline="Live team state, evidence health, and handoff readiness for autonomous local execution."
         />
         <MissionHistoryPanel
           history={missionHistory}
@@ -2041,6 +2407,7 @@ export function App() {
             agentRun={activeAgentRun}
             agentRunEvents={agentRunEvents}
             agentRuntimeInfo={agentRuntimeInfo}
+            auditEvents={auditEvents}
             artifactContents={artifactContents}
             artifacts={artifactEvidence}
             activeTask={activeTask}
@@ -2083,6 +2450,7 @@ export function App() {
             tasks={missionTasks}
             toolCalls={toolCalls}
             toolPolicy={toolPolicy}
+            automationPolicy={automationPolicy}
             gitOperations={gitOperations}
             gitPolicy={gitPolicy}
             reviewPackets={reviewPackets}
@@ -2110,424 +2478,6 @@ export function App() {
       </main>
     </div>
   );
-}
-
-function LeftNav() {
-  const items: { label: string; icon: LucideIcon; active?: boolean }[] = [
-    { label: "HQ", icon: LayoutDashboard, active: true },
-    { label: "Missions", icon: Command },
-    { label: "Company", icon: UsersRound },
-    { label: "Artifacts", icon: FileText },
-    { label: "QA Lab", icon: TestTube2 },
-    { label: "Deployments", icon: GitBranch },
-    { label: "Settings", icon: Boxes }
-  ];
-
-  return (
-    <aside className="left-nav" aria-label="Primary navigation">
-      <div className="brand-mark" aria-label="Team AI Agent">
-        <Bot size={22} />
-      </div>
-      <nav>
-        {items.map((item) => (
-          <button className={item.active ? "nav-item is-active" : "nav-item"} key={item.label} type="button">
-            <item.icon size={18} />
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </nav>
-    </aside>
-  );
-}
-
-function missionRiskLabel(missionPlan: ReturnType<typeof parseMissionCommand>): string {
-  if (missionPlan.risks.some((risk) => risk.level === "high")) return "High";
-  if (missionPlan.risks.some((risk) => risk.level === "medium")) return "Medium";
-  return "Low";
-}
-
-function missionAutonomyLabel(mode: ReturnType<typeof parseMissionCommand>["autonomyMode"]): string {
-  if (mode === "needs_setup") return "Needs setup";
-  if (mode === "review_first") return "Review first";
-  return "Autopilot";
-}
-
-function TopHud({
-  missionPlan,
-  missionTitle
-}: {
-  missionPlan: ReturnType<typeof parseMissionCommand>;
-  missionTitle: string;
-}) {
-  return (
-    <header className="top-hud">
-      <div className="mission-id">
-        <span>Mission</span>
-        <strong>{missionTitle}</strong>
-      </div>
-      <div className="hud-metrics" aria-label="Mission metrics">
-        <HudMetric icon={Zap} label="Mode" value={missionAutonomyLabel(missionPlan.autonomyMode)} tone="blue" />
-        <HudMetric icon={UsersRound} label="Roles" value={`${missionPlan.recommendedRoleIds.length} mapped`} tone="green" />
-        <HudMetric icon={AlertTriangle} label="Risk" value={missionRiskLabel(missionPlan)} tone={missionRiskLabel(missionPlan) === "Low" ? "green" : "amber"} />
-        <HudMetric icon={Activity} label="Confidence" value={`${missionPlan.confidence}%`} tone="neutral" />
-      </div>
-      <button className="search-button" type="button">
-        <Search size={16} />
-        Search commands
-      </button>
-    </header>
-  );
-}
-
-function MissionIntakePanel({
-  assumptionDraft,
-  commandDraft,
-  isAutopilotRunning,
-  isSaving,
-  lastSavedAt,
-  lastSavedCommandDraft,
-  missionAssumptions,
-  missionPlan,
-  missionState,
-  onAssumptionChange,
-  onCommandChange,
-  onResetDraft,
-  onSaveMission
-}: {
-  assumptionDraft: string;
-  commandDraft: string;
-  isAutopilotRunning: boolean;
-  isSaving: boolean;
-  lastSavedAt: string;
-  lastSavedCommandDraft: string;
-  missionAssumptions: readonly AssumptionRecord[];
-  missionPlan: ReturnType<typeof parseMissionCommand>;
-  missionState: RuntimeMissionState;
-  onAssumptionChange: (value: string) => void;
-  onCommandChange: (value: string) => void;
-  onResetDraft: () => void;
-  onSaveMission: () => void | Promise<void>;
-}) {
-  const hasCommand = commandDraft.trim().length > 0;
-  const savedAssumptionDraft = formatAssumptionDraft(missionAssumptions);
-  const hasDraftChanges =
-    commandDraft !== lastSavedCommandDraft ||
-    assumptionDraft !== savedAssumptionDraft ||
-    missionState.status === "draft";
-  const capabilityLabels = missionPlan.detectedCapabilities.slice(0, 4).map((capability) => capability.label);
-  const riskLabels = missionPlan.risks.length > 0
-    ? missionPlan.risks.slice(0, 3).map((risk) => `${risk.label} (${risk.level})`)
-    : ["No high-risk signals"];
-  const missingInputLabels = missionPlan.missingInputs.length > 0
-    ? missionPlan.missingInputs.slice(0, 3)
-    : ["Ready to run"];
-
-  return (
-    <section className="mission-intake-panel" aria-label="Mission intake">
-      <form
-        className="mission-intake-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onSaveMission();
-        }}
-      >
-        <div className="mission-intake-copy">
-          <div className="mission-intake-heading">
-            <div>
-              <span>Mission intake</span>
-              <h2>{missionState.title}</h2>
-            </div>
-            <span className={`mission-state status-${missionState.status}`} title={missionState.statusReason}>
-              {missionStateLabel[missionState.status]}
-            </span>
-          </div>
-          <div className="mission-intake-fields">
-            <label className="mission-command-field">
-              <span>Command</span>
-              <textarea
-                aria-label="Mission intake command"
-                onChange={(event) => onCommandChange(event.target.value)}
-                placeholder="Describe the next mission for the AI company"
-                rows={3}
-                spellCheck="false"
-                value={commandDraft}
-              />
-            </label>
-            <label className="mission-command-field">
-              <span>Assumptions</span>
-              <textarea
-                aria-label="Mission assumptions"
-                onChange={(event) => onAssumptionChange(event.target.value)}
-                placeholder={"Sales API exposes daily totals\nCSV fields are export-safe"}
-                rows={3}
-                spellCheck="false"
-                value={assumptionDraft}
-              />
-            </label>
-          </div>
-          <div className="mission-intake-chips" aria-label="Parsed mission intake">
-            {[...capabilityLabels, ...riskLabels, ...missingInputLabels].slice(0, 8).map((label) => (
-              <span key={label}>{label}</span>
-            ))}
-          </div>
-        </div>
-        <div className="mission-intake-controls">
-          <div className="mission-intake-stats" aria-label="Mission intake status">
-            <span>{missionAutonomyLabel(missionPlan.autonomyMode)}</span>
-            <span>{missionPlan.confidence}% confidence</span>
-            <span>Saved {formatSavedAt(lastSavedAt)}</span>
-            <span>{missionPlan.recommendedRoleIds.length} roles</span>
-            <span>{missionAssumptions.length} assumptions</span>
-          </div>
-          <div className="mission-intake-actions">
-            <button disabled={isSaving || isAutopilotRunning || !hasDraftChanges} onClick={onResetDraft} type="button">
-              <RotateCcw size={15} />
-              Reset draft
-            </button>
-            <button className="is-primary" disabled={isSaving || isAutopilotRunning || !hasCommand || !hasDraftChanges} type="submit">
-              <ClipboardCheck size={15} />
-              {isSaving ? "Saving" : "Save mission"}
-            </button>
-          </div>
-        </div>
-      </form>
-    </section>
-  );
-}
-
-function HudMetric({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: string }) {
-  return (
-    <div className={`hud-metric tone-${tone}`}>
-      <Icon size={14} />
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function MissionHistoryPanel({
-  history,
-  isLoading,
-  onSelect,
-  selectedHistoryId
-}: {
-  history: readonly MissionHistorySummary[];
-  isLoading: boolean;
-  onSelect: (summary: MissionHistorySummary) => void | Promise<void>;
-  selectedHistoryId: string;
-}) {
-  return (
-    <section className="mission-history-band" aria-label="Mission run history">
-      <div className="mission-history-heading">
-        <div>
-          <Archive size={16} />
-          <h2>Mission history</h2>
-        </div>
-        <span>{Math.max(0, history.length - 1)} archived</span>
-      </div>
-      <div className="mission-history-list">
-        {history.length > 0 ? history.slice(0, 8).map((item) => (
-          <button
-            aria-pressed={selectedHistoryId === item.id}
-            className={selectedHistoryId === item.id ? "mission-history-row is-selected" : "mission-history-row"}
-            disabled={isLoading}
-            key={item.id}
-            onClick={() => void onSelect(item)}
-            type="button"
-          >
-            <span className={`history-status status-${item.status}`}>{item.kind === "current" ? "Current" : item.status}</span>
-            <span className="history-run-copy">
-              <strong>{item.title}</strong>
-              <small>
-                {item.controllerId ? `Run ${item.attempt ?? 1} · ${item.currentStage?.replaceAll("_", " ")}` : "Saved intake"}
-              </small>
-            </span>
-            <span className="history-evidence-count">
-              {item.toolCallCount + item.gitOperationCount + item.reviewPacketCount} evidence
-            </span>
-            <time dateTime={item.updatedAt}>{formatHistoryTimestamp(item.updatedAt)}</time>
-            <ChevronRight size={15} />
-          </button>
-        )) : (
-          <p className="mission-history-empty">History is available when the orchestrator is connected.</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function MissionRecoveryInspector({ history }: { history: MissionHistoryRecord }) {
-  const controller = history.controller;
-  const packet = history.reviewPackets[0];
-  const deliveryArtifactId = controller?.deliveryArtifactContentId ?? packet?.deliveryArtifactContentId;
-  const delivery = history.artifactContents.find((artifact) => artifact.id === deliveryArtifactId);
-  const stageResults = controller?.stageResults
-    .filter((result) => result.attempt === controller.attempt)
-    .sort((a, b) => missionControllerStages.indexOf(a.stage) - missionControllerStages.indexOf(b.stage)) ?? [];
-
-  return (
-    <aside className="inspector recovery-inspector" aria-label="Recovered mission evidence">
-      <div className="inspector-header">
-        <div>
-          <span>Read-only archive</span>
-          <h2>{history.title}</h2>
-        </div>
-        <Archive size={22} />
-      </div>
-      <div className="recovery-banner">
-        <ShieldCheck size={15} />
-        <span>Snapshot {formatHistoryTimestamp(history.archivedAt ?? history.updatedAt)}</span>
-        <strong className={`status-${history.status}`}>{history.status}</strong>
-      </div>
-
-      <section className="recovery-section" aria-label="Recovered controller run">
-        <div className="section-title">
-          <Play size={15} />
-          <h3>Controller run</h3>
-        </div>
-        {controller ? (
-          <>
-            <div className="recovery-facts">
-              <span>Attempt <strong>{controller.attempt}/{controller.maxAttempts}</strong></span>
-              <span>Stage <strong>{controller.currentStage.replaceAll("_", " ")}</strong></span>
-              <span>Provider <strong>{controller.providerPreference}</strong></span>
-            </div>
-            <ol className="recovery-stage-list">
-              {stageResults.map((result) => (
-                <li className={`status-${result.status}`} key={`${result.attempt}-${result.stage}`}>
-                  <strong>{result.stage.replaceAll("_", " ")}</strong>
-                  <span>{result.summary}</span>
-                </li>
-              ))}
-            </ol>
-            {controller.stopReason ? <p className="controller-stop-reason"><AlertTriangle size={13} /> {controller.stopReason.message}</p> : null}
-          </>
-        ) : <p className="recovery-empty">No controller run was attached to this intake.</p>}
-      </section>
-
-      <section className="recovery-section" aria-label="Recovered evidence totals">
-        <div className="section-title">
-          <Activity size={15} />
-          <h3>Evidence ledger</h3>
-        </div>
-        <div className="recovery-count-grid">
-          <span><strong>{history.agentRuns.length}</strong> Agent</span>
-          <span><strong>{history.toolCalls.length}</strong> Tool</span>
-          <span><strong>{history.gitOperations.length}</strong> Git</span>
-          <span><strong>{history.reviewPackets.length}</strong> Review</span>
-          <span><strong>{history.artifactContents.length}</strong> Artifacts</span>
-        </div>
-      </section>
-
-      <RecoveryEvidenceList
-        emptyLabel="No agent run evidence"
-        icon={Bot}
-        items={history.agentRuns.map((run) => ({
-          id: run.id,
-          label: `${shortRoleName(run.roleId)} · ${run.provider}`,
-          status: run.status,
-          summary: run.errorSummary ?? run.verification?.decision ?? `${run.usage.outputTokens} output tokens`
-        }))}
-        title="Agent runs"
-      />
-      <RecoveryEvidenceList
-        emptyLabel="No tool evidence"
-        icon={Code2}
-        items={history.toolCalls.map((call) => ({
-          id: call.id,
-          label: toolCallKindLabel[call.kind],
-          status: call.status,
-          summary: call.errorSummary ?? call.result?.summary ?? call.policy.reason
-        }))}
-        title="Tool evidence"
-      />
-      <RecoveryEvidenceList
-        emptyLabel="No Git evidence"
-        icon={GitBranch}
-        items={history.gitOperations.map((operation) => ({
-          id: operation.id,
-          label: gitOperationKindLabel[operation.kind],
-          status: operation.status,
-          summary: gitOperationSummary(operation)
-        }))}
-        title="Git operations"
-      />
-
-      <section className="recovery-section" aria-label="Recovered review packet">
-        <div className="section-title">
-          <ClipboardCheck size={15} />
-          <h3>Review and CI</h3>
-        </div>
-        {packet ? (
-          <>
-            <div className="recovery-facts">
-              <span>Status <strong>{packet.status.replaceAll("_", " ")}</strong></span>
-              <span>CI <strong>{packet.ciRun?.status ?? "not run"}</strong></span>
-              <span>Reviews <strong>{packet.reviews.length}/{packet.requiredReviewerRoleIds.length}</strong></span>
-            </div>
-            <p>{packet.summary}</p>
-          </>
-        ) : <p className="recovery-empty">No review packet was attached.</p>}
-      </section>
-
-      <section className="recovery-section recovery-delivery" aria-label="Recovered delivery packet">
-        <div className="section-title">
-          <FileText size={15} />
-          <h3>Delivery packet</h3>
-        </div>
-        {delivery ? (
-          <>
-            <strong>{delivery.title}</strong>
-            <p>{delivery.summary}</p>
-            {delivery.sections.slice(0, 3).map((section) => (
-              <div className="recovery-delivery-section" key={section.heading}>
-                <span>{section.heading}</span>
-                <p>{section.body}</p>
-              </div>
-            ))}
-          </>
-        ) : <p className="recovery-empty">No delivery packet was generated for this run.</p>}
-      </section>
-    </aside>
-  );
-}
-
-function RecoveryEvidenceList({
-  emptyLabel,
-  icon: Icon,
-  items,
-  title
-}: {
-  emptyLabel: string;
-  icon: LucideIcon;
-  items: readonly { id: string; label: string; status: string; summary: string }[];
-  title: string;
-}) {
-  return (
-    <section className="recovery-section" aria-label={title}>
-      <div className="section-title">
-        <Icon size={15} />
-        <h3>{title}</h3>
-      </div>
-      {items.length > 0 ? (
-        <div className="recovery-evidence-list">
-          {items.slice(0, 8).map((item) => (
-            <div className="recovery-evidence-row" key={item.id}>
-              <span className={`status-${item.status}`}>{item.status}</span>
-              <strong>{item.label}</strong>
-              <p>{item.summary}</p>
-            </div>
-          ))}
-        </div>
-      ) : <p className="recovery-empty">{emptyLabel}</p>}
-    </section>
-  );
-}
-
-function formatHistoryTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown time";
-  return date.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function PhaseTimeline({
@@ -2831,6 +2781,7 @@ function MissionInspector({
   agentRun,
   agentRunEvents,
   agentRuntimeInfo,
+  auditEvents,
   artifactContents,
   artifacts,
   activeRoute,
@@ -2855,6 +2806,7 @@ function MissionInspector({
   taskRuns,
   toolCalls,
   toolPolicy,
+  automationPolicy,
   reviewPackets,
   onApproveReviewRole,
   onBuildCommitPlan,
@@ -2884,6 +2836,7 @@ function MissionInspector({
   agentRun: AgentRunRecord | undefined;
   agentRunEvents: readonly AgentRunEvent[];
   agentRuntimeInfo: AgentRuntimeInfo;
+  auditEvents: readonly RuntimeAuditEvent[];
   artifactContents: readonly RuntimeArtifactContent[];
   artifacts: readonly ArtifactEvidence[];
   activeRoute: WorkflowRoute;
@@ -2893,6 +2846,7 @@ function MissionInspector({
   isGitRunning: boolean;
   isReviewRunning: boolean;
   isToolRunning: boolean;
+  automationPolicy: AutomationPolicySnapshot;
   missionAssumptions: readonly AssumptionRecord[];
   missionPlan: ReturnType<typeof parseMissionCommand>;
   selectedRole: RoleId;
@@ -2933,9 +2887,39 @@ function MissionInspector({
   onRunTypecheck: () => void | Promise<void>;
   onCloseArtifact: () => void;
 }) {
+  const [evidenceSourceFilter, setEvidenceSourceFilter] = useState<EvidenceSourceFilter>("real");
+  const [evidenceStatusFilter, setEvidenceStatusFilter] = useState<EvidenceStatusFilter>("all");
+  const prioritizedArtifactContents = useMemo(
+    () => [...artifactContents].sort(compareArtifactContent),
+    [artifactContents]
+  );
+  const visibleArtifactContents = useMemo(
+    () => filterArtifactContent(prioritizedArtifactContents, evidenceSourceFilter, evidenceStatusFilter),
+    [evidenceSourceFilter, evidenceStatusFilter, prioritizedArtifactContents]
+  );
+  const ollamaLearningCandidates = useMemo(
+    () => createOllamaLearningCandidates(prioritizedArtifactContents),
+    [prioritizedArtifactContents]
+  );
+  const commandOutputSummaries = useMemo(
+    () => createCommandOutputSummaries(toolCalls, gitOperations, toolPolicy, gitPolicy),
+    [gitOperations, gitPolicy, toolCalls, toolPolicy]
+  );
+  const automationEvidence = useMemo(
+    () => createAutomationEvidence({
+      artifactContents,
+      gitOperations,
+      gitPolicy,
+      missionController,
+      reviewPackets
+    }),
+    [artifactContents, gitOperations, gitPolicy, missionController, reviewPackets]
+  );
   const selectedArtifact = artifacts.find((artifact) => artifact.id === selectedArtifactId);
   const selectedArtifactContent =
-    artifactContents.find((content) => content.artifactId === selectedArtifactId) ?? artifactContents[0];
+    prioritizedArtifactContents.find((content) => content.artifactId === selectedArtifactId)
+      ?? visibleArtifactContents[0]
+      ?? prioritizedArtifactContents[0];
   const selectedRoomMeta = departmentMeta[selectedRoomId];
   const currentTask = selectedActiveRole?.task ?? roleDefinition(selectedRole).responsibilities[0] ?? "Coordinate role output";
 
@@ -2970,6 +2954,14 @@ function MissionInspector({
         controller={missionController}
         onCancel={onCancelMissionController}
         onRetry={onRetryMissionController}
+      />
+      <RemoteHandoffExecutionCard
+        auditEvents={auditEvents}
+        gitOperations={gitOperations}
+      />
+      <AutomationPolicyCard
+        evidence={automationEvidence}
+        policy={automationPolicy}
       />
       <AgentRunCard
         events={agentRunEvents}
@@ -3007,6 +2999,21 @@ function MissionInspector({
         onRefresh={onRefreshReviewPacket}
         onRunCi={onRunReviewCi}
         packet={reviewPackets[0]}
+      />
+      <EvidenceInspectorCard
+        contents={visibleArtifactContents}
+        onSelectArtifact={onSelectArtifact}
+        selectedArtifactId={selectedArtifactId}
+        sourceFilter={evidenceSourceFilter}
+        statusFilter={evidenceStatusFilter}
+        totalCount={prioritizedArtifactContents.length}
+        onSourceFilterChange={setEvidenceSourceFilter}
+        onStatusFilterChange={setEvidenceStatusFilter}
+      />
+      <CommandOutputSummaryCard summaries={commandOutputSummaries} />
+      <OllamaLearningCard
+        candidates={ollamaLearningCandidates}
+        runtimeInfo={agentRuntimeInfo}
       />
       <section className="command-plan-card" aria-label="Parsed mission command plan">
         <div className="section-title">
@@ -3142,6 +3149,55 @@ function MissionInspector({
   );
 }
 
+function createAutomationEvidence({
+  artifactContents,
+  gitOperations,
+  gitPolicy,
+  missionController,
+  reviewPackets
+}: {
+  artifactContents: readonly RuntimeArtifactContent[];
+  gitOperations: readonly GitOperationRecord[];
+  gitPolicy: GitPolicySnapshot;
+  missionController: MissionControllerRecord | undefined;
+  reviewPackets: readonly ReviewPacket[];
+}): AutomationEvidenceContext {
+  const latestReviewPacket = reviewPackets[0];
+  const latestRemoteEvidence = gitOperations.find((operation) => operation.result?.remoteEvidence)?.result?.remoteEvidence;
+  const latestWorktree = gitOperations.find((operation) => operation.result?.worktree)?.result?.worktree;
+  const reviewedDelivery = Boolean(latestReviewPacket?.status === "delivered" && latestReviewPacket.deliveryArtifactContentId);
+  const reviewerApproval = Boolean(
+    latestReviewPacket &&
+    latestReviewPacket.requiredReviewerRoleIds.length > 0 &&
+    latestReviewPacket.requiredReviewerRoleIds.every((roleId) =>
+      latestReviewPacket.reviews.some((review) => review.reviewerRoleId === roleId && review.decision === "pass")
+    )
+  );
+  const rollbackPlan = artifactContents.some((content) =>
+    isRealArtifactContent(content) &&
+    `${content.summary}\n${content.markdown}`.toLowerCase().includes("rollback")
+  );
+
+  return {
+    policy_switch_enabled: gitPolicy.allowRemotePush || gitPolicy.allowPullRequestCreate,
+    connector_policy_present: gitPolicy.allowRemotePush || gitPolicy.allowPullRequestCreate,
+    reviewed_delivery: reviewedDelivery,
+    passing_local_ci: latestReviewPacket?.ciRun?.status === "passed",
+    reviewer_approval: reviewerApproval,
+    remote_branch_current: latestRemoteEvidence?.publicationState === "published_current",
+    draft_pr_open: latestRemoteEvidence?.pullRequest.state === "open",
+    rollback_plan: rollbackPlan,
+    staging_smoke_passed: false,
+    production_approval: false,
+    bounded_retry_budget: Boolean(
+      missionController &&
+      ["blocked", "failed", "cancelled"].includes(missionController.status) &&
+      missionController.attempt < missionController.maxAttempts
+    ),
+    no_secret_material: latestWorktree ? !latestWorktree.hasDeniedChanges : false
+  };
+}
+
 const missionControllerStages: readonly MissionControllerStage[] = [
   "planning",
   "tool_evidence",
@@ -3149,7 +3205,8 @@ const missionControllerStages: readonly MissionControllerStage[] = [
   "review_packet",
   "local_ci",
   "reviewers",
-  "delivery"
+  "delivery",
+  "handoff_policy"
 ];
 
 function MissionControllerCard({
@@ -3178,6 +3235,7 @@ function MissionControllerCard({
       .filter((item) => item.attempt === controller.attempt)
       .map((item) => [item.stage, item])
   );
+  const guidance = createMissionControllerGuidance(controller);
 
   return (
     <section className="mission-controller-card" aria-label="Autonomous mission controller">
@@ -3218,6 +3276,10 @@ function MissionControllerCard({
       {controller.stopReason ? (
         <p className="controller-stop-reason"><AlertTriangle size={13} /> {controller.stopReason.message}</p>
       ) : null}
+      {controller.automationDecisions?.length ? (
+        <AutomationDecisionSummary decisions={controller.automationDecisions} title="Handoff policy decisions" />
+      ) : null}
+      <HardeningGuidanceList guidance={guidance} />
       <div className="controller-actions">
         {!isTerminalMissionController(controller.status) ? (
           <button type="button" onClick={() => void onCancel()}><Square size={12} /> Cancel mission</button>
@@ -3244,6 +3306,8 @@ function AgentRunCard({
   runtimeInfo: AgentRuntimeInfo;
 }) {
   if (!run) {
+    const guidance = createAgentRuntimeGuidance(runtimeInfo);
+
     return (
       <section className="agent-run-card" aria-label="Local agent runtime">
         <div className="section-title">
@@ -3255,6 +3319,7 @@ function AgentRunCard({
           <span>{runtimeInfo.model}</span>
         </div>
         <p>{runtimeInfo.message}</p>
+        <HardeningGuidanceList guidance={guidance} />
       </section>
     );
   }
@@ -3267,6 +3332,7 @@ function AgentRunCard({
     ?? (run.verification && verificationScore !== undefined
       ? `${run.verification.decision === "pass" ? "Planning passed" : "Planning stopped"} at ${verificationScore}/100 after ${run.attempt} attempt${run.attempt === 1 ? "" : "s"}.`
       : "Waiting for the first persisted run event.");
+  const guidance = createAgentRuntimeGuidance(runtimeInfo, run);
 
   return (
     <section className="agent-run-card" aria-label="Active local agent run" aria-live="polite">
@@ -3297,6 +3363,7 @@ function AgentRunCard({
           ))}
         </ul>
       ) : null}
+      <HardeningGuidanceList guidance={guidance} />
       <div className="agent-run-actions">
         {!terminal ? (
           <button type="button" onClick={() => void onCancel()}>
@@ -3402,6 +3469,7 @@ function GitIntegrationCard({
   const latestRemoteEvidence = operations.find((operation) => operation.result?.remoteEvidence)?.result?.remoteEvidence;
   const latestRemotePolicy = operations.find((operation) => operation.result?.remoteMutationPolicy)?.result?.remoteMutationPolicy;
   const workspaceLabel = formatWorkspaceLabel(policy.workspaceRoot);
+  const guidance = createGitHardeningGuidance(policy, operations);
 
   return (
     <section className="git-integration-card" aria-label="Local Git integration">
@@ -3437,6 +3505,7 @@ function GitIntegrationCard({
           <small>{latestRemoteEvidence.retryable ? `Retry: ${latestRemoteEvidence.retryReason}` : "Merge off, deploy off, force push off, deletion off"}</small>
         </div>
       ) : null}
+      <HardeningGuidanceList guidance={guidance} />
       <div className="git-actions">
         <button type="button" disabled={isRunning || !policy.allowGitRead} onClick={() => void onCheckStatus()}>
           <GitBranch size={13} /> Check status
@@ -3517,6 +3586,7 @@ function ReviewPacketCard({
 
   const passedRequirements = packet.requirements.filter((item) => item.status === "pass").length;
   const approvedReviewers = new Set(packet.reviews.filter((item) => item.decision === "pass").map((item) => item.reviewerRoleId));
+  const guidance = createReviewHardeningGuidance(packet);
 
   return (
     <section className="review-packet-card" aria-label="Review and delivery packet">
@@ -3535,6 +3605,7 @@ function ReviewPacketCard({
         </span>
       </div>
       <p className="review-summary">{packet.summary}</p>
+      <HardeningGuidanceList guidance={guidance} />
       <div className="review-requirements" aria-label="Evidence completeness checklist">
         {packet.requirements.map((item) => (
           <article className={`requirement-row status-${item.status}`} key={item.id} title={item.summary}>
@@ -3581,187 +3652,6 @@ function ReviewPacketCard({
         <button type="button" disabled={isRunning} onClick={() => void onCreateDelivery()}>
           <FileText size={13} /> Build delivery report
         </button>
-      </div>
-    </section>
-  );
-}
-
-function TaskGraphCard({
-  activeTaskId,
-  tasks,
-  taskRuns,
-  onSelectTask
-}: {
-  activeTaskId: string;
-  tasks: readonly MissionTask[];
-  taskRuns: Record<string, TaskRunStatus>;
-  onSelectTask: (taskId: string) => void;
-}) {
-  return (
-    <section className="task-graph-card" aria-label="Mission task graph">
-      <div className="section-title">
-        <Boxes size={16} />
-        <h3>Task Graph</h3>
-      </div>
-      <div className="task-rows">
-        {tasks.map((task) => {
-          const status = taskRuns[task.id] ?? task.initialStatus;
-          return (
-            <button
-              className={activeTaskId === task.id ? `task-row is-selected status-${status}` : `task-row status-${status}`}
-              key={task.id}
-              onClick={() => onSelectTask(task.id)}
-              type="button"
-              aria-pressed={activeTaskId === task.id}
-            >
-              <span className="task-row-status">{taskStatusLabel[status]}</span>
-              <strong>{task.title}</strong>
-              <em>{shortRoleName(task.ownerRoleId)}</em>
-              <span className="task-row-eta">{task.eta}</span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function ArtifactMemoryCard({ content }: { content: RuntimeArtifactContent | undefined }) {
-  if (!content) {
-    return (
-      <section className="artifact-memory-card" aria-label="Generated artifact memory">
-        <div className="section-title">
-          <Archive size={16} />
-          <h3>Artifact Memory</h3>
-        </div>
-        <p className="artifact-memory-empty">Run autopilot to generate the first stored artifact.</p>
-      </section>
-    );
-  }
-
-  const previewSections = content.sections.slice(0, 3);
-
-  return (
-    <section className="artifact-memory-card" aria-label="Generated artifact memory">
-      <div className="section-title">
-        <Archive size={16} />
-        <h3>Artifact Memory</h3>
-      </div>
-      <div className="artifact-memory-header">
-        <div>
-          <strong>{content.title}</strong>
-          <span>
-            v{content.version} / {shortRoleName(content.ownerRoleId)}
-          </span>
-        </div>
-        <em>{artifactSourceLabel(content.source)}</em>
-      </div>
-      <p>{content.summary}</p>
-      <div className="artifact-memory-sections">
-        {previewSections.map((section) => (
-          <article key={section.heading}>
-            <strong>{section.heading}</strong>
-            <p>{section.body}</p>
-            <span>{section.evidence.slice(0, 2).join(" / ")}</span>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function BottomDock({
-  events,
-  activityFilter,
-  artifactRecordCount,
-  auditEventCount,
-  isAutopilotRunning,
-  lastSavedAt,
-  missionPlan,
-  missionState,
-  onFilterChange,
-  onRunAutopilot,
-  orchestratorMessage,
-  orchestratorStatus,
-  agentRuntimeInfo
-}: {
-  events: readonly ActivityEvent[];
-  activityFilter: ActivityFilter;
-  artifactRecordCount: number;
-  auditEventCount: number;
-  isAutopilotRunning: boolean;
-  lastSavedAt: string;
-  missionPlan: ReturnType<typeof parseMissionCommand>;
-  missionState: RuntimeMissionState;
-  onFilterChange: (filter: ActivityFilter) => void;
-  onRunAutopilot: () => void | Promise<void>;
-  orchestratorMessage: string;
-  orchestratorStatus: OrchestratorConnectionStatus;
-  agentRuntimeInfo: AgentRuntimeInfo;
-}) {
-  return (
-    <section className="bottom-dock" aria-label="Mission command and activity feed">
-      <form
-        className="command-dock"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onRunAutopilot();
-        }}
-      >
-        <div className="command-input execution-summary">
-          <Sparkles size={18} />
-          <span>Mission run</span>
-          <strong>{missionPlan.title}</strong>
-          <p>{missionPlan.summary}</p>
-          <div className="command-meta" aria-label="Mission session memory status">
-            <span className={`command-status status-${orchestratorStatus}`} title={orchestratorMessage}>
-              {orchestratorStatusLabel[orchestratorStatus]}
-            </span>
-            <span className={`mission-state status-${missionState.status}`} title={missionState.statusReason}>
-              {missionStateLabel[missionState.status]}
-            </span>
-            <span className={`runtime-provider status-${agentRuntimeInfo.activeProvider}`} title={agentRuntimeInfo.message}>
-              {agentRuntimeInfo.activeProvider === "ollama" ? `Ollama ${agentRuntimeInfo.model}` : "Deterministic mode"}
-            </span>
-            <span>{missionPlan.autonomyMode.replaceAll("_", " ")}</span>
-            <span>{missionPlan.confidence}% confidence</span>
-            <span>Saved {formatSavedAt(lastSavedAt)}</span>
-            <span>{artifactRecordCount} artifacts</span>
-            <span>{auditEventCount} audit events</span>
-          </div>
-        </div>
-        <button disabled={isAutopilotRunning} type="submit">
-          <Play size={16} />
-          {isAutopilotRunning ? "Mission running" : "Run local agents"}
-        </button>
-      </form>
-      <div className="activity-panel">
-        <div className="activity-filters" aria-label="Activity filters">
-          {activityFilterOptions.map((option) => (
-            <button
-              className={activityFilter === option.id ? "is-selected" : ""}
-              key={option.id}
-              onClick={() => onFilterChange(option.id)}
-              type="button"
-              aria-pressed={activityFilter === option.id}
-            >
-              <option.icon size={13} />
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <div className="activity-feed">
-          {events.map((event) => (
-            <article className={`event-row tone-${event.tone}`} key={event.id}>
-              <span className="event-time">{event.time}</span>
-              <div>
-                <strong>{event.title}</strong>
-                <p>{event.summary}</p>
-              </div>
-              <span className="event-role">{shortRoleName(event.roleId)}</span>
-            </article>
-          ))}
-        </div>
       </div>
     </section>
   );

@@ -1,5 +1,6 @@
 import { ROLE_IDS } from "./roles.js";
 import type { AgentProvider, AgentRuntimeMode } from "./agent-runs.js";
+import type { AutomationDecision } from "./automation.js";
 import type { ReviewerDecision } from "./reviews.js";
 import type { RoleId } from "./roles.js";
 
@@ -15,7 +16,8 @@ export const MISSION_CONTROLLER_STAGES = [
   "review_packet",
   "local_ci",
   "reviewers",
-  "delivery"
+  "delivery",
+  "handoff_policy"
 ] as const;
 
 export type MissionControllerStage = (typeof MISSION_CONTROLLER_STAGES)[number];
@@ -75,6 +77,7 @@ export type MissionControllerRecord = {
   maxAttempts: number;
   stageResults: readonly MissionControllerStageResult[];
   reviewerResults: readonly LocalReviewerResult[];
+  automationDecisions?: readonly AutomationDecision[];
   agentRunId?: string;
   reviewPacketId?: string;
   deliveryArtifactContentId?: string;

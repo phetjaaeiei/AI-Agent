@@ -153,6 +153,11 @@ export type RuntimeAuditEvent = {
     | "review_packet_created"
     | "review_packet_updated"
     | "delivery_packet_created"
+    | "automation_handoff_started"
+    | "automation_handoff_completed"
+    | "automation_handoff_execution_started"
+    | "automation_handoff_execution_skipped"
+    | "automation_handoff_execution_completed"
     | "mission_controller_started"
     | "mission_controller_completed"
     | "mission_controller_stopped";

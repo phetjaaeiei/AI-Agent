@@ -10,6 +10,7 @@ import {
   ResilientReviewExecutor
 } from "../../../packages/agent-core/src/index.js";
 import {
+  createDefaultAutomationPolicySnapshot,
   isGitOperationRequest,
   isMissionControllerStartRequest,
   isReviewDecisionRequest,
@@ -118,6 +119,11 @@ export function createOrchestratorServer({
       if (request.method === "GET" && url.pathname === "/api/mission/git-policy") {
         if (!gitOperationService) return sendJson(response, 503, { error: "Git runner is not configured." });
         sendJson(response, 200, gitOperationService.getPolicy());
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/mission/automation-policy") {
+        sendJson(response, 200, createDefaultAutomationPolicySnapshot(now()));
         return;
       }
 

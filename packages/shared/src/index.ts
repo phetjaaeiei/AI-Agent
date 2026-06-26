@@ -2,6 +2,7 @@ export * from "./types/accuracy.js";
 export * from "./types/agent-runs.js";
 export * from "./types/artifacts.js";
 export * from "./types/audit.js";
+export * from "./types/automation.js";
 export * from "./types/git.js";
 export * from "./types/model-routing.js";
 export * from "./types/mission-controller.js";

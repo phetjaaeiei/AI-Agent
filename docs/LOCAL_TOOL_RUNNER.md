@@ -72,3 +72,7 @@ Example body:
 - `npm run build:web`
 
 The verification covers file read, denied secret paths, outside-workspace paths, file write patch artifacts, passing test evidence, failing test evidence, command blocking, persistence, reset, and HTTP endpoints.
+
+## Mission Control Output Safety
+
+Phase 8 H3 adds a `Command Output` inspector card that summarizes recent tool and Git command evidence. The UI clips previews and redacts the configured workspace root, denied path patterns such as `.env`, bearer tokens, OpenAI-style API keys, and secret-like `key=value` fields before rendering output text. This is a display-safety layer on top of the runner policy; it does not loosen the underlying file, command, or Git execution rules.

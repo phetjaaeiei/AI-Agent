@@ -16,6 +16,9 @@
     "verify:git-runner": "npm run build && node scripts/verify/git-runner.mjs",
     "verify:review-packet": "npm run build && node scripts/verify/review-packet.mjs",
     "verify:mission-controller": "npm run build && node scripts/verify/mission-controller.mjs",
+    "verify:automation-policy": "npm run build && node scripts/verify/automation-policy.mjs",
+    "verify:phase8-e2e": "npm run build && node scripts/verify/phase8-e2e.mjs",
+    "verify:phase8-rendered": "npm run build && node scripts/verify/phase8-rendered-qa.mjs",
     "verify:ollama": "npm run build && node scripts/verify/ollama.mjs",
     "eval:agent-runtime": "npm run build && node evals/agent-runtime/run.mjs"
   },
